@@ -42,15 +42,32 @@ private slots:
     void exportClients();
     void searchClients(const QString &text);
 
-    // Citernes module slots (basic)
+    // Citernes module slots (advanced)
     void showAddCiterneDialog();
     void editSelectedCiterne();
     void deleteSelectedCiterne();
+    void viewCiterneDetails();
     void onFillButtonClicked();
     void onDrainButtonClicked();
     void searchCiternes(const QString &text);
     void sortCiternes();
     void exportCiternes();
+    
+    // Blending simulator slots
+    void openBlendingSimulator();
+    void performBlending();
+    void calculateBlendingResult();
+    
+    // Notification & Alert slots
+    void checkLowLevelAlerts();
+    void showNotifications();
+    void configureThresholds();
+    void viewFillingHistory();
+    
+    // Predictive maintenance slots
+    void checkPredictiveAlerts();
+    void showEquipmentStatus();
+    void detectAnomalies();
 
     // Navigation between pages
     void showStatisticsView();
@@ -92,6 +109,13 @@ private:
     QPushButton *addCiterneBtn = nullptr;
     QPushButton *editCiterneBtn = nullptr;
     QPushButton *deleteCiterneBtn = nullptr;
+    QPushButton *detailsCiterneBtn = nullptr;
+    QPushButton *blendingBtn = nullptr;
+    QPushButton *alertsBtn = nullptr;
+    
+    // Blending & Notification data
+    double lowLevelThreshold = 30.0; // Configurable threshold
+    QStringList notificationHistory;
 
     // Build UI
     void setupUI();
