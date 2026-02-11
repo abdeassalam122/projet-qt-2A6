@@ -327,24 +327,106 @@ void MainWindow::createCiternesPage()
 void MainWindow::createReceptionPage()
 {
     receptionPage = new QWidget();
-    QVBoxLayout *l = new QVBoxLayout(receptionPage);
-    l->addWidget(createHeaderWidget("Réception"));
-    QLabel *lbl = new QLabel("Module Réception - à implémenter (liste réceptions, création, etc.)");
-    lbl->setWordWrap(true);
-    l->addWidget(lbl);
-    l->addStretch();
+    QVBoxLayout *mainLay = new QVBoxLayout(receptionPage);
+    mainLay->setContentsMargins(12,12,12,12);
+    mainLay->setSpacing(8);
+    
+    QWidget *hdr = createHeaderWidget("Gestion des Réceptions");
+    mainLay->addWidget(hdr);
+    
+    // Controls
+    QHBoxLayout *ctrl = new QHBoxLayout();
+    QLineEdit *searchBox = new QLineEdit();
+    searchBox->setPlaceholderText("Rechercher réception...");
+    searchBox->setFixedHeight(34);
+    
+    QPushButton *addBtn = new QPushButton("+ Ajouter réception");
+    addBtn->setFixedSize(150,34);
+    
+    ctrl->addWidget(searchBox);
+    ctrl->addWidget(addBtn);
+    ctrl->addStretch();
+    mainLay->addLayout(ctrl);
+    
+    // Table
+    QTableWidget *table = new QTableWidget();
+    table->setColumnCount(7);
+    table->setHorizontalHeaderLabels({"ID","Date","Citerne","Quantité (L)","Température","Statut","Actions"});
+    table->horizontalHeader()->setStretchLastSection(false);
+    table->setColumnWidth(0, 60);
+    table->setColumnWidth(1, 100);
+    table->setColumnWidth(2, 120);
+    table->setColumnWidth(3, 100);
+    table->setColumnWidth(4, 100);
+    table->setColumnWidth(5, 100);
+    table->setColumnWidth(6, 80);
+    
+    // Sample data
+    table->insertRow(0);
+    table->setItem(0, 0, new QTableWidgetItem("R001"));
+    table->setItem(0, 1, new QTableWidgetItem("2026-02-10"));
+    table->setItem(0, 2, new QTableWidgetItem("C001"));
+    table->setItem(0, 3, new QTableWidgetItem("5000"));
+    table->setItem(0, 4, new QTableWidgetItem("22°C"));
+    table->setItem(0, 5, new QTableWidgetItem("Complétée"));
+    
+    mainLay->addWidget(table);
     stackedWidget->addWidget(receptionPage);
 }
 
 void MainWindow::createFacturationPage()
 {
     facturationPage = new QWidget();
-    QVBoxLayout *l = new QVBoxLayout(facturationPage);
-    l->addWidget(createHeaderWidget("Facturation"));
-    QLabel *lbl = new QLabel("Module Facturation - à implémenter (factures, paiements, rapports).");
-    lbl->setWordWrap(true);
-    l->addWidget(lbl);
-    l->addStretch();
+    QVBoxLayout *mainLay = new QVBoxLayout(facturationPage);
+    mainLay->setContentsMargins(12,12,12,12);
+    mainLay->setSpacing(8);
+    
+    QWidget *hdr = createHeaderWidget("Gestion de la Facturation");
+    mainLay->addWidget(hdr);
+    
+    // Controls
+    QHBoxLayout *ctrl = new QHBoxLayout();
+    QLineEdit *searchBox = new QLineEdit();
+    searchBox->setPlaceholderText("Rechercher facture...");
+    searchBox->setFixedHeight(34);
+    
+    QPushButton *addBtn = new QPushButton("+ Créer facture");
+    addBtn->setFixedSize(150,34);
+    
+    QPushButton *pdfBtn = new QPushButton("📄 Exporter PDF");
+    pdfBtn->setFixedSize(150,34);
+    
+    ctrl->addWidget(searchBox);
+    ctrl->addWidget(addBtn);
+    ctrl->addWidget(pdfBtn);
+    ctrl->addStretch();
+    mainLay->addLayout(ctrl);
+    
+    // Table
+    QTableWidget *table = new QTableWidget();
+    table->setColumnCount(8);
+    table->setHorizontalHeaderLabels({"Facture","Date","Client","Montant (€)","TVA","Payé","Statut","Actions"});
+    table->horizontalHeader()->setStretchLastSection(false);
+    table->setColumnWidth(0, 100);
+    table->setColumnWidth(1, 100);
+    table->setColumnWidth(2, 130);
+    table->setColumnWidth(3, 110);
+    table->setColumnWidth(4, 80);
+    table->setColumnWidth(5, 80);
+    table->setColumnWidth(6, 100);
+    table->setColumnWidth(7, 80);
+    
+    // Sample data
+    table->insertRow(0);
+    table->setItem(0, 0, new QTableWidgetItem("FAC001"));
+    table->setItem(0, 1, new QTableWidgetItem("2026-02-05"));
+    table->setItem(0, 2, new QTableWidgetItem("ACME Corp"));
+    table->setItem(0, 3, new QTableWidgetItem("1500.00"));
+    table->setItem(0, 4, new QTableWidgetItem("315.00"));
+    table->setItem(0, 5, new QTableWidgetItem("Oui"));
+    table->setItem(0, 6, new QTableWidgetItem("Payée"));
+    
+    mainLay->addWidget(table);
     stackedWidget->addWidget(facturationPage);
 }
 
@@ -400,7 +482,7 @@ void MainWindow::applyStyles()
         QTabBar { border: none; }
         QTabBar::tab { background: #E8F1EE; color: #24433A; padding: 8px 14px; margin-right: 6px; border: none; border-top-left-radius: 8px; border-top-right-radius: 8px; }
         QTabBar::tab:selected { background: #0A5F58; color: #FFFFFF; border: none; }
-        #searchBox, #searchBoxCiternes { border:1px solid #A3CAD3; border-radius:6px; padding:6px; }
+This branch is up to date with citerne.        #searchBox, #searchBoxCiternes { border:1px solid #A3CAD3; border-radius:6px; padding:6px; }
         QPushButton { border-radius:6px; padding:6px 10px; }
         QTableWidget { background: white; border: 1px solid #E8E8E8; }
         QHeaderView::section { background: #0A5F58; color: white; padding:8px; }
@@ -585,14 +667,13 @@ void MainWindow::editSelectedClient()
     QObject *s = sender();
     int targetRow = -1;
     if (s && s->property("client_id").isValid()) {
-        int id = s->property("client_id").toInt();
-        targetRow = findClientRowById(id);
+        int clientId = s->property("client_id").toInt();
+        targetRow = findClientRowById(clientId);
     } else {
         targetRow = clientsTable->currentRow();
     }
     if (targetRow < 0) { QMessageBox::warning(this,"Avertissement","Sélectionnez un client à éditer."); return; }
 
-    int id = clientsTable->item(targetRow,0)->text().toInt();
     QString name = clientsTable->item(targetRow,1)->text();
     QString email = clientsTable->item(targetRow,2)->text();
     QString phone = clientsTable->item(targetRow,3)->text();
@@ -791,10 +872,8 @@ void MainWindow::exportCiternes()
 // ============================================================================
 void MainWindow::showStatisticsView()
 {
-    // last added page is statistics placeholder (we added it by createStatisticsPage)
-    QWidget *statsWidget = nullptr;
-    // find widget named "Statistiques" in stack (we added as last)
-    // For simplicity, show the last widget added (statistics)
+    // Show the last added page (statistics placeholder)
+    // created by createStatisticsPage()
     stackedWidget->setCurrentIndex(stackedWidget->count()-1);
 }
 
