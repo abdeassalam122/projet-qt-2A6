@@ -389,7 +389,7 @@ void MainWindow::createReceptionPage()
     receptionPage = new QWidget();
     QVBoxLayout *l = new QVBoxLayout(receptionPage);
     l->addWidget(createHeaderWidget("Réception"));
-    QLabel *lbl = new QLabel("Module Réception - à implémenter (liste réceptions, création, etc.)");
+    QLabel *lbl = new QLabel("Module Réception - à implémenter");
     lbl->setWordWrap(true);
     l->addWidget(lbl);
     l->addStretch();
@@ -401,7 +401,7 @@ void MainWindow::createFacturationPage()
     facturationPage = new QWidget();
     QVBoxLayout *l = new QVBoxLayout(facturationPage);
     l->addWidget(createHeaderWidget("Facturation"));
-    QLabel *lbl = new QLabel("Module Facturation - à implémenter (factures, paiements, rapports).");
+    QLabel *lbl = new QLabel("Module Facturation - à implémenter");
     lbl->setWordWrap(true);
     l->addWidget(lbl);
     l->addStretch();
@@ -461,7 +461,7 @@ void MainWindow::applyStyles()
         QTabBar { border: none; }
         QTabBar::tab { background: #E8F1EE; color: #24433A; padding: 8px 14px; margin-right: 6px; border: none; border-top-left-radius: 8px; border-top-right-radius: 8px; }
         QTabBar::tab:selected { background: #0A5F58; color: #FFFFFF; border: none; }
-        #searchBox, #searchBoxCiternes { border:1px solid #A3CAD3; border-radius:6px; padding:6px; }
+This branch is up to date with citerne.        #searchBox, #searchBoxCiternes { border:1px solid #A3CAD3; border-radius:6px; padding:6px; }
         QPushButton { border-radius:6px; padding:6px 10px; }
         QTableWidget { background: white; border: 1px solid #E8E8E8; }
         QHeaderView::section { background: #0A5F58; color: white; padding:8px; }
@@ -822,14 +822,13 @@ void MainWindow::editSelectedClient()
     QObject *s = sender();
     int targetRow = -1;
     if (s && s->property("client_id").isValid()) {
-        int id = s->property("client_id").toInt();
-        targetRow = findClientRowById(id);
+        int clientId = s->property("client_id").toInt();
+        targetRow = findClientRowById(clientId);
     } else {
         targetRow = clientsTable->currentRow();
     }
     if (targetRow < 0) { QMessageBox::warning(this,"Avertissement","Sélectionnez un client à éditer."); return; }
 
-    int id = clientsTable->item(targetRow,0)->text().toInt();
     QString name = clientsTable->item(targetRow,1)->text();
     QString email = clientsTable->item(targetRow,2)->text();
     QString phone = clientsTable->item(targetRow,3)->text();
@@ -1173,10 +1172,8 @@ void MainWindow::exportCiternes()
 // ============================================================================
 void MainWindow::showStatisticsView()
 {
-    // last added page is statistics placeholder (we added it by createStatisticsPage)
-    QWidget *statsWidget = nullptr;
-    // find widget named "Statistiques" in stack (we added as last)
-    // For simplicity, show the last widget added (statistics)
+    // Show the last added page (statistics placeholder)
+    // created by createStatisticsPage()
     stackedWidget->setCurrentIndex(stackedWidget->count()-1);
 }
 
