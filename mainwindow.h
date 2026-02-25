@@ -15,8 +15,10 @@
 #include <QFrame>
 #include <QDateEdit>
 #include <QString>
+#include <QList>
 #include <QButtonGroup>
 #include <QTabBar>
+#include <QSqlDatabase>
 
 class MainWindow : public QMainWindow
 {
@@ -42,15 +44,32 @@ private slots:
     void exportClients();
     void searchClients(const QString &text);
 
-    // Citernes module slots (basic)
+    // Citernes module slots (advanced)
     void showAddCiterneDialog();
     void editSelectedCiterne();
     void deleteSelectedCiterne();
+    void viewCiterneDetails();
     void onFillButtonClicked();
     void onDrainButtonClicked();
     void searchCiternes(const QString &text);
     void sortCiternes();
     void exportCiternes();
+    
+    // Quality simulator slots
+    void openBlendingSimulator();
+    void performBlending();
+    void calculateBlendingResult();
+    
+    // Notification & Alert slots
+    void checkLowLevelAlerts();
+    void showNotifications();
+    void configureThresholds();
+    void viewFillingHistory();
+    
+    // Predictive maintenance slots
+    void checkPredictiveAlerts();
+    void showEquipmentStatus();
+    void detectAnomalies();
 
     // Navigation between pages
     void showStatisticsView();
@@ -92,6 +111,14 @@ private:
     QPushButton *addCiterneBtn = nullptr;
     QPushButton *editCiterneBtn = nullptr;
     QPushButton *deleteCiterneBtn = nullptr;
+    QPushButton *detailsCiterneBtn = nullptr;
+    QPushButton *blendingBtn = nullptr;
+    QPushButton *alertsBtn = nullptr;
+    
+    // Quality simulation & Notification data
+    double lowLevelThreshold = 30.0; // Configurable threshold
+    QStringList notificationHistory;
+    QList<int> qualitySelectedRows;
 
     // Build UI
     void setupUI();
@@ -114,6 +141,18 @@ private:
     // Progress widget helpers (DECLARED HERE to avoid "undeclared identifier")
     QWidget* createProgressWidget(int percent);
     QWidget* createProgressBar(int percent); // alias used in code
+
+    bool promptAndTestOracleConnection();
+    void updateDatabaseStatusLabel();
+    bool setupOracleSchema();
+    void loadClientsFromOracle();
+    void loadCiternesFromOracle();
+    QWidget* createClientActionsWidget(int id);
+    QWidget* createCiterneActionsWidget(int id);
+
+    QSqlDatabase db;
+    QLabel *dbStatusLabel = nullptr;
+    bool oracleActive = false;
 };
 
 #endif // MAINWINDOW_H
