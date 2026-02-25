@@ -1,4 +1,6 @@
 #include "mainwindow.h"
+#include "connexion.h"
+#include "citerne.h"
 
 #include <QMessageBox>
 #include <QFormLayout>
@@ -15,6 +17,9 @@
 #include <QDoubleSpinBox>
 #include <QListWidget>
 #include <QGroupBox>
+#include <QSqlQuery>
+#include <QSqlError>
+#include <QSqlRecord>
 
 // ============================================================================
 // CONSTRUCTOR / DESTRUCTOR
@@ -24,12 +29,26 @@ MainWindow::MainWindow(QWidget *parent)
 {
     setupUI();
     applyStyles();
-    populateClientsSampleData();
-    populateCiternesSampleData();
+    oracleActive = promptAndTestOracleConnection();
+    if (oracleActive) {
+        oracleActive = setupOracleSchema();
+    }
+    updateDatabaseStatusLabel();
+
+    if (oracleActive) {
+        loadClientsFromOracle();
+        loadCiternesFromOracle();
+    } else {
+        populateClientsSampleData();
+        populateCiternesSampleData();
+    }
 }
 
 MainWindow::~MainWindow()
 {
+    if (db.isValid() && db.isOpen()) {
+        db.close();
+    }
 }
 
 // ============================================================================
@@ -134,7 +153,13 @@ QWidget* MainWindow::createSideBar()
     connect(btnReception, &QPushButton::clicked, this, &MainWindow::switchToReception);
     connect(btnFacturation, &QPushButton::clicked, this, &MainWindow::switchToFacturation);
 
+    dbStatusLabel = new QLabel("Base Oracle: non connectée");
+    dbStatusLabel->setObjectName("dbStatusLabel");
+    dbStatusLabel->setWordWrap(true);
+    dbStatusLabel->setStyleSheet("padding:8px; border-radius:8px;");
+
     v->addStretch();
+    v->addWidget(dbStatusLabel);
     return side;
 }
 
@@ -283,40 +308,20 @@ void MainWindow::createCiternesPage()
     contentLay->setContentsMargins(8,8,8,8);
     contentLay->setSpacing(10);
 
-    // Search row for citernes
+    // Search row for citernes (only search input)
     QHBoxLayout *ctrl = new QHBoxLayout();
     searchBoxCiternes = new QLineEdit();
     searchBoxCiternes->setPlaceholderText("Rechercher par ID / Qualité ...");
     searchBoxCiternes->setFixedHeight(34);
     connect(searchBoxCiternes, &QLineEdit::textChanged, this, &MainWindow::searchCiternes);
 
-    addCiterneBtn = new QPushButton("+ Ajouter");
-    addCiterneBtn->setFixedSize(110,34);
-    connect(addCiterneBtn, &QPushButton::clicked, this, &MainWindow::showAddCiterneDialog);
-
-    editCiterneBtn = new QPushButton("✎ Éditer");
-    editCiterneBtn->setFixedSize(100,34);
-    connect(editCiterneBtn, &QPushButton::clicked, this, &MainWindow::editSelectedCiterne);
-
-    deleteCiterneBtn = new QPushButton("🗑 Suppr.");
-    deleteCiterneBtn->setFixedSize(100,34);
-    connect(deleteCiterneBtn, &QPushButton::clicked, this, &MainWindow::deleteSelectedCiterne);
-    
-    detailsCiterneBtn = new QPushButton("📋 Détails");
-    detailsCiterneBtn->setFixedSize(110,34);
-    connect(detailsCiterneBtn, &QPushButton::clicked, this, &MainWindow::viewCiterneDetails);
-
     ctrl->addWidget(searchBoxCiternes);
-    ctrl->addWidget(addCiterneBtn);
-    ctrl->addWidget(editCiterneBtn);
-    ctrl->addWidget(deleteCiterneBtn);
-    ctrl->addWidget(detailsCiterneBtn);
     ctrl->addStretch();
     contentLay->addLayout(ctrl);
     
     // Advanced features row
     QHBoxLayout *advCtrl = new QHBoxLayout();
-    blendingBtn = new QPushButton("🔀 Simulateur Blending");
+    blendingBtn = new QPushButton("🧪 Simulateur Qualité");
     blendingBtn->setFixedSize(180,34);
     connect(blendingBtn, &QPushButton::clicked, this, &MainWindow::openBlendingSimulator);
     
@@ -346,6 +351,31 @@ void MainWindow::createCiternesPage()
     citernesTable->verticalHeader()->setVisible(false);
     citernesTable->setObjectName("citernesTable");
     contentLay->addWidget(citernesTable);
+
+    // action buttons below table just like clients
+    QHBoxLayout *actions = new QHBoxLayout();
+    addCiterneBtn = new QPushButton("+ Ajouter");
+    addCiterneBtn->setFixedSize(120,36);
+    connect(addCiterneBtn, &QPushButton::clicked, this, &MainWindow::showAddCiterneDialog);
+
+    editCiterneBtn = new QPushButton("✎ Éditer");
+    editCiterneBtn->setFixedSize(100,36);
+    connect(editCiterneBtn, &QPushButton::clicked, this, &MainWindow::editSelectedCiterne);
+
+    detailsCiterneBtn = new QPushButton("👁 Voir");
+    detailsCiterneBtn->setFixedSize(100,36);
+    connect(detailsCiterneBtn, &QPushButton::clicked, this, &MainWindow::viewCiterneDetails);
+
+    deleteCiterneBtn = new QPushButton("🗑 Supprimer");
+    deleteCiterneBtn->setFixedSize(120,36);
+    connect(deleteCiterneBtn, &QPushButton::clicked, this, &MainWindow::deleteSelectedCiterne);
+
+    actions->addWidget(addCiterneBtn);
+    actions->addWidget(editCiterneBtn);
+    actions->addWidget(detailsCiterneBtn);
+    actions->addWidget(deleteCiterneBtn);
+    actions->addStretch();
+    contentLay->addLayout(actions);
 
     mainLay->addWidget(content);
     stackedWidget->addWidget(citernesPage);
@@ -422,6 +452,7 @@ void MainWindow::applyStyles()
         #sideBar QLabel { background: transparent; }
         #sideBrand { color: #EAF5F0; font-size: 22px; font-weight: 700; letter-spacing: 0.5px; }
         #sideSubtitle { color: #9CB5AD; font-size: 11px; text-transform: uppercase; letter-spacing: 1px; }
+        #dbStatusLabel { background: #24433A; color: #EAF5F0; font-size: 11px; }
         QPushButton[nav="true"] { text-align: left; padding: 10px 12px; border-radius: 10px; color: #EAF5F0; background: transparent; }
         QPushButton[nav="true"]:hover { background: #24433A; }
         QPushButton[nav="true"]:checked { background: #2E574B; color: #FFFFFF; font-weight: 600; }
@@ -461,15 +492,7 @@ void MainWindow::populateClientsSampleData()
         clientsTable->setItem(i,4, new QTableWidgetItem(c.address));
         clientsTable->setItem(i,5, new QTableWidgetItem(c.reg));
         clientsTable->setItem(i,6, new QTableWidgetItem(c.status));
-        // Actions widget
-        QWidget *w = new QWidget();
-        QHBoxLayout *hl = new QHBoxLayout(w);
-        hl->setContentsMargins(2,2,2,2);
-        QPushButton *view = new QPushButton("👁"); view->setFixedSize(28,28); view->setProperty("client_id", c.id); connect(view, &QPushButton::clicked, this, &MainWindow::viewSelectedClient);
-        QPushButton *edit = new QPushButton("✎"); edit->setFixedSize(28,28); edit->setProperty("client_id", c.id); connect(edit, &QPushButton::clicked, this, &MainWindow::editSelectedClient);
-        QPushButton *del = new QPushButton("🗑"); del->setFixedSize(28,28); del->setProperty("client_id", c.id); connect(del, &QPushButton::clicked, this, &MainWindow::deleteSelectedClient);
-        hl->addWidget(view); hl->addWidget(edit); hl->addWidget(del); hl->addStretch();
-        clientsTable->setCellWidget(i,7, w);
+        clientsTable->setCellWidget(i,7, createClientActionsWidget(c.id));
     }
     clientsTable->resizeColumnsToContents();
 }
@@ -505,17 +528,191 @@ void MainWindow::populateCiternesSampleData()
         citernesTable->setItem(i,5, new QTableWidgetItem(QString::number(temp,'f',1)));
         citernesTable->setItem(i,6, new QTableWidgetItem(last));
 
-        // actions
-        QWidget *aw = new QWidget();
-        QHBoxLayout *al = new QHBoxLayout(aw);
-        al->setContentsMargins(2,2,2,2);
-        QPushButton *fill = new QPushButton("➕"); fill->setFixedSize(28,28); fill->setProperty("citerne_id", id); connect(fill, &QPushButton::clicked, this, &MainWindow::onFillButtonClicked);
-        QPushButton *drain = new QPushButton("➖"); drain->setFixedSize(28,28); drain->setProperty("citerne_id", id); connect(drain, &QPushButton::clicked, this, &MainWindow::onDrainButtonClicked);
-        QPushButton *edit = new QPushButton("✎"); edit->setFixedSize(28,28); edit->setProperty("citerne_id", id); connect(edit, &QPushButton::clicked, this, &MainWindow::editSelectedCiterne);
-        al->addWidget(fill); al->addWidget(drain); al->addWidget(edit); al->addStretch();
-        citernesTable->setCellWidget(i,7, aw);
+        citernesTable->setCellWidget(i,7, createCiterneActionsWidget(id));
     }
     citernesTable->resizeColumnsToContents();
+}
+
+bool MainWindow::setupOracleSchema()
+{
+    if (!db.isValid() || !db.isOpen()) {
+        return false;
+    }
+
+    QSqlQuery q(db);
+    auto execSql = [&](const QString &sql, QString &lastError) {
+        if (!q.exec(sql)) {
+            lastError = q.lastError().text();
+            return false;
+        }
+        return true;
+    };
+
+    QString lastError;
+    const QStringList ddl = {
+        "BEGIN EXECUTE IMMEDIATE 'CREATE TABLE clients_app ("
+        "id NUMBER PRIMARY KEY, "
+        "nom VARCHAR2(120) NOT NULL, "
+        "email VARCHAR2(180), "
+        "telephone VARCHAR2(40), "
+        "adresse VARCHAR2(240), "
+        "inscrit_le DATE DEFAULT SYSDATE NOT NULL, "
+        "statut VARCHAR2(30))'; "
+        "EXCEPTION WHEN OTHERS THEN IF SQLCODE != -955 THEN RAISE; END IF; END;",
+
+        "BEGIN EXECUTE IMMEDIATE 'CREATE TABLE citernes_app ("
+        "id NUMBER PRIMARY KEY, "
+        "capacite_l NUMBER(12,2) NOT NULL, "
+        "volume_l NUMBER(12,2) DEFAULT 0 NOT NULL, "
+        "qualite VARCHAR2(60), "
+        "temperature_c NUMBER(5,2), "
+        "dernier_remplissage DATE, "
+        "CONSTRAINT ck_citernes_app_cap CHECK (capacite_l > 0), "
+        "CONSTRAINT ck_citernes_app_vol CHECK (volume_l >= 0 AND volume_l <= capacite_l))'; "
+        "EXCEPTION WHEN OTHERS THEN IF SQLCODE != -955 THEN RAISE; END IF; END;",
+
+        "BEGIN EXECUTE IMMEDIATE 'CREATE SEQUENCE seq_clients_app START WITH 1 INCREMENT BY 1 NOCACHE NOCYCLE'; "
+        "EXCEPTION WHEN OTHERS THEN IF SQLCODE != -955 THEN RAISE; END IF; END;",
+
+        "BEGIN EXECUTE IMMEDIATE 'CREATE SEQUENCE seq_citernes_app START WITH 1 INCREMENT BY 1 NOCACHE NOCYCLE'; "
+        "EXCEPTION WHEN OTHERS THEN IF SQLCODE != -955 THEN RAISE; END IF; END;",
+
+        "CREATE OR REPLACE TRIGGER trg_clients_app_bi "
+        "BEFORE INSERT ON clients_app "
+        "FOR EACH ROW "
+        "WHEN (NEW.id IS NULL) "
+        "BEGIN "
+        "SELECT seq_clients_app.NEXTVAL INTO :NEW.id FROM dual; "
+        "END;",
+
+        "CREATE OR REPLACE TRIGGER trg_citernes_app_bi "
+        "BEFORE INSERT ON citernes_app "
+        "FOR EACH ROW "
+        "WHEN (NEW.id IS NULL) "
+        "BEGIN "
+        "SELECT seq_citernes_app.NEXTVAL INTO :NEW.id FROM dual; "
+        "END;"
+    };
+
+    for (const QString &sql : ddl) {
+        if (!execSql(sql, lastError)) {
+            QMessageBox::critical(this, "Oracle", "Initialisation du schéma échouée:\n" + lastError);
+            return false;
+        }
+    }
+
+    return true;
+}
+
+void MainWindow::loadClientsFromOracle()
+{
+    if (!oracleActive || !db.isOpen()) {
+        return;
+    }
+
+    QSqlQuery q(db);
+    if (!q.exec("SELECT id, nom, email, telephone, adresse, TO_CHAR(inscrit_le,'YYYY-MM-DD'), statut FROM clients_app ORDER BY id")) {
+        QMessageBox::critical(this, "Oracle", "Chargement clients échoué:\n" + q.lastError().text());
+        return;
+    }
+
+    clientsTable->setRowCount(0);
+    int row = 0;
+    while (q.next()) {
+        const int id = q.value(0).toInt();
+        clientsTable->insertRow(row);
+        clientsTable->setItem(row,0, new QTableWidgetItem(QString::number(id)));
+        clientsTable->setItem(row,1, new QTableWidgetItem(q.value(1).toString()));
+        clientsTable->setItem(row,2, new QTableWidgetItem(q.value(2).toString()));
+        clientsTable->setItem(row,3, new QTableWidgetItem(q.value(3).toString()));
+        clientsTable->setItem(row,4, new QTableWidgetItem(q.value(4).toString()));
+        clientsTable->setItem(row,5, new QTableWidgetItem(q.value(5).toString()));
+        clientsTable->setItem(row,6, new QTableWidgetItem(q.value(6).toString()));
+        clientsTable->setCellWidget(row,7, createClientActionsWidget(id));
+        ++row;
+    }
+    clientsTable->resizeColumnsToContents();
+}
+
+void MainWindow::loadCiternesFromOracle()
+{
+    if (!oracleActive || !db.isOpen()) {
+        return;
+    }
+
+    QString errorMessage;
+    const QList<Citerne> citernes = Citerne::afficher(db, &errorMessage);
+    if (!errorMessage.isEmpty()) {
+        QMessageBox::critical(this, "Oracle", "Chargement citernes échoué:\n" + errorMessage);
+        return;
+    }
+
+    citernesTable->setRowCount(0);
+    int row = 0;
+    for (const Citerne &citerne : citernes) {
+        const int id = citerne.id();
+        const double capacite = citerne.capaciteL();
+        const double volume = citerne.volumeL();
+        citernesTable->insertRow(row);
+        citernesTable->setItem(row,0, new QTableWidgetItem(QString::number(id)));
+        citernesTable->setItem(row,1, new QTableWidgetItem(QString::number(capacite,'f',2)));
+        citernesTable->setItem(row,2, new QTableWidgetItem(QString::number(volume,'f',2)));
+        citernesTable->setCellWidget(row,3, createProgressWidget(capacite > 0 ? int((volume / capacite) * 100.0) : 0));
+        citernesTable->setItem(row,4, new QTableWidgetItem(citerne.qualite()));
+        citernesTable->setItem(row,5, new QTableWidgetItem(QString::number(citerne.temperatureC(),'f',1)));
+        citernesTable->setItem(row,6, new QTableWidgetItem(citerne.dernierRemplissage().toString("yyyy-MM-dd")));
+        citernesTable->setCellWidget(row,7, createCiterneActionsWidget(id));
+        ++row;
+    }
+    citernesTable->resizeColumnsToContents();
+}
+
+QWidget* MainWindow::createClientActionsWidget(int id)
+{
+    QWidget *w = new QWidget();
+    QHBoxLayout *hl = new QHBoxLayout(w);
+    hl->setContentsMargins(2,2,2,2);
+    QPushButton *view = new QPushButton("👁");
+    view->setFixedSize(28,28);
+    view->setProperty("client_id", id);
+    connect(view, &QPushButton::clicked, this, &MainWindow::viewSelectedClient);
+    QPushButton *edit = new QPushButton("✎");
+    edit->setFixedSize(28,28);
+    edit->setProperty("client_id", id);
+    connect(edit, &QPushButton::clicked, this, &MainWindow::editSelectedClient);
+    QPushButton *del = new QPushButton("🗑");
+    del->setFixedSize(28,28);
+    del->setProperty("client_id", id);
+    connect(del, &QPushButton::clicked, this, &MainWindow::deleteSelectedClient);
+    hl->addWidget(view);
+    hl->addWidget(edit);
+    hl->addWidget(del);
+    hl->addStretch();
+    return w;
+}
+
+QWidget* MainWindow::createCiterneActionsWidget(int id)
+{
+    QWidget *aw = new QWidget();
+    QHBoxLayout *al = new QHBoxLayout(aw);
+    al->setContentsMargins(2,2,2,2);
+    QPushButton *fill = new QPushButton("➕");
+    fill->setFixedSize(28,28);
+    fill->setProperty("citerne_id", id);
+    connect(fill, &QPushButton::clicked, this, &MainWindow::onFillButtonClicked);
+    QPushButton *drain = new QPushButton("➖");
+    drain->setFixedSize(28,28);
+    drain->setProperty("citerne_id", id);
+    connect(drain, &QPushButton::clicked, this, &MainWindow::onDrainButtonClicked);
+    QPushButton *edit = new QPushButton("✎");
+    edit->setFixedSize(28,28);
+    edit->setProperty("citerne_id", id);
+    connect(edit, &QPushButton::clicked, this, &MainWindow::editSelectedCiterne);
+    al->addWidget(fill);
+    al->addWidget(drain);
+    al->addWidget(edit);
+    al->addStretch();
+    return aw;
 }
 
 // small helper: create progress widget for citernes
@@ -587,6 +784,23 @@ void MainWindow::showAddClientDialog()
     v->addWidget(bb);
 
     if (dlg.exec() == QDialog::Accepted) {
+        if (oracleActive && db.isOpen()) {
+            QSqlQuery q(db);
+            q.prepare("INSERT INTO clients_app (nom,email,telephone,adresse,inscrit_le,statut) "
+                      "VALUES (:nom,:email,:telephone,:adresse,TO_DATE(:inscrit,'YYYY-MM-DD'),'Actif')");
+            q.bindValue(":nom", name->text());
+            q.bindValue(":email", email->text());
+            q.bindValue(":telephone", phone->text());
+            q.bindValue(":adresse", address->text());
+            q.bindValue(":inscrit", regDate->date().toString("yyyy-MM-dd"));
+            if (!q.exec()) {
+                QMessageBox::critical(this, "Oracle", "Ajout client échoué:\n" + q.lastError().text());
+                return;
+            }
+            loadClientsFromOracle();
+            return;
+        }
+
         int newRow = clientsTable->rowCount();
         clientsTable->insertRow(newRow);
         int maxId = 0;
@@ -599,14 +813,7 @@ void MainWindow::showAddClientDialog()
         clientsTable->setItem(newRow,4, new QTableWidgetItem(address->text()));
         clientsTable->setItem(newRow,5, new QTableWidgetItem(regDate->date().toString("yyyy-MM-dd")));
         clientsTable->setItem(newRow,6, new QTableWidgetItem("Actif"));
-        QWidget *w = new QWidget();
-        QHBoxLayout *hl = new QHBoxLayout(w);
-        hl->setContentsMargins(2,2,2,2);
-        QPushButton *view = new QPushButton("👁"); view->setFixedSize(28,28); view->setProperty("client_id", id); connect(view, &QPushButton::clicked, this, &MainWindow::viewSelectedClient);
-        QPushButton *edit = new QPushButton("✎"); edit->setFixedSize(28,28); edit->setProperty("client_id", id); connect(edit, &QPushButton::clicked, this, &MainWindow::editSelectedClient);
-        QPushButton *del = new QPushButton("🗑"); del->setFixedSize(28,28); del->setProperty("client_id", id); connect(del, &QPushButton::clicked, this, &MainWindow::deleteSelectedClient);
-        hl->addWidget(view); hl->addWidget(edit); hl->addWidget(del); hl->addStretch();
-        clientsTable->setCellWidget(newRow,7,w);
+        clientsTable->setCellWidget(newRow,7, createClientActionsWidget(id));
     }
 }
 
@@ -643,6 +850,25 @@ void MainWindow::editSelectedClient()
     connect(bb,&QDialogButtonBox::accepted,&dlg,&QDialog::accept); connect(bb,&QDialogButtonBox::rejected,&dlg,&QDialog::reject);
     v->addWidget(bb);
     if (dlg.exec() == QDialog::Accepted) {
+        if (oracleActive && db.isOpen()) {
+            QSqlQuery q(db);
+            q.prepare("UPDATE clients_app SET nom=:nom,email=:email,telephone=:telephone,adresse=:adresse,"
+                      "inscrit_le=TO_DATE(:inscrit,'YYYY-MM-DD') WHERE id=:id");
+            q.bindValue(":nom", nameE->text());
+            q.bindValue(":email", emailE->text());
+            q.bindValue(":telephone", phoneE->text());
+            q.bindValue(":adresse", addressE->text());
+            q.bindValue(":inscrit", regE->date().toString("yyyy-MM-dd"));
+            q.bindValue(":id", id);
+            if (!q.exec()) {
+                QMessageBox::critical(this, "Oracle", "Modification client échouée:\n" + q.lastError().text());
+                return;
+            }
+            loadClientsFromOracle();
+            QMessageBox::information(this,"Succès","Client mis à jour.");
+            return;
+        }
+
         clientsTable->item(targetRow,1)->setText(nameE->text());
         clientsTable->item(targetRow,2)->setText(emailE->text());
         clientsTable->item(targetRow,3)->setText(phoneE->text());
@@ -679,9 +905,23 @@ void MainWindow::deleteSelectedClient()
         targetRow = clientsTable->currentRow();
     }
     if (targetRow < 0) { QMessageBox::warning(this,"Avertissement","Sélectionnez un client à supprimer."); return; }
-    QString id = clientsTable->item(targetRow,0)->text();
+    const int id = clientsTable->item(targetRow,0)->text().toInt();
     QMessageBox::StandardButton rep = QMessageBox::question(this,"Confirmer suppression", QString("Supprimer le client ID %1 ?").arg(id), QMessageBox::Yes|QMessageBox::No);
-    if (rep == QMessageBox::Yes) { clientsTable->removeRow(targetRow); QMessageBox::information(this,"Supprimé","Client supprimé."); }
+    if (rep == QMessageBox::Yes) {
+        if (oracleActive && db.isOpen()) {
+            QSqlQuery q(db);
+            q.prepare("DELETE FROM clients_app WHERE id=:id");
+            q.bindValue(":id", id);
+            if (!q.exec()) {
+                QMessageBox::critical(this, "Oracle", "Suppression client échouée:\n" + q.lastError().text());
+                return;
+            }
+            loadClientsFromOracle();
+        } else {
+            clientsTable->removeRow(targetRow);
+        }
+        QMessageBox::information(this,"Supprimé","Client supprimé.");
+    }
 }
 
 void MainWindow::searchClients(const QString &text)
@@ -726,6 +966,23 @@ void MainWindow::showAddCiterneDialog()
     QDialogButtonBox *bb = new QDialogButtonBox(QDialogButtonBox::Ok|QDialogButtonBox::Cancel); connect(bb,&QDialogButtonBox::accepted,&dlg,&QDialog::accept); connect(bb,&QDialogButtonBox::rejected,&dlg,&QDialog::reject); v->addWidget(bb);
 
     if (dlg.exec() == QDialog::Accepted) {
+        if (oracleActive && db.isOpen()) {
+            Citerne citerne;
+            citerne.setCapaciteL(cap->text().toDouble());
+            citerne.setVolumeL(vol->text().toDouble());
+            citerne.setQualite(qual->text());
+            citerne.setTemperatureC(temp->text().toDouble());
+            citerne.setDernierRemplissage(last->date());
+
+            QString errorMessage;
+            if (!citerne.ajouter(db, &errorMessage)) {
+                QMessageBox::critical(this, "Oracle", "Ajout citerne échoué:\n" + errorMessage);
+                return;
+            }
+            loadCiternesFromOracle();
+            return;
+        }
+
         int r = citernesTable->rowCount(); citernesTable->insertRow(r);
         int maxId=0; for (int i=0;i<citernesTable->rowCount();++i){ QTableWidgetItem *it=citernesTable->item(i,0); if(it) maxId=qMax(maxId,it->text().toInt()); }
         int id = maxId+1;
@@ -737,16 +994,80 @@ void MainWindow::showAddCiterneDialog()
         citernesTable->setItem(r,4,new QTableWidgetItem(qual->text()));
         citernesTable->setItem(r,5,new QTableWidgetItem(temp->text()));
         citernesTable->setItem(r,6,new QTableWidgetItem(last->date().toString("yyyy-MM-dd")));
-        // add actions buttons similar to populateCiternesSampleData -> omitted here for brevity
+        citernesTable->setCellWidget(r,7, createCiterneActionsWidget(id));
     }
 }
 
 void MainWindow::editSelectedCiterne()
 {
-    // Basic stub: reuse selection row
-    int row = citernesTable->currentRow();
+    QObject *s = sender();
+    int row = -1;
+    if (s && s->property("citerne_id").isValid()) {
+        row = findCiterneRowById(s->property("citerne_id").toInt());
+    } else {
+        row = citernesTable->currentRow();
+    }
     if (row<0) { QMessageBox::warning(this,"Avertissement","Sélectionnez une citerne."); return; }
-    QMessageBox::information(this,"Éditer","Édition citerne - à implémenter (placeholder).");
+
+    const int id = citernesTable->item(row,0)->text().toInt();
+    const QString cap0 = citernesTable->item(row,1)->text();
+    const QString vol0 = citernesTable->item(row,2)->text();
+    const QString qual0 = citernesTable->item(row,4)->text();
+    const QString temp0 = citernesTable->item(row,5)->text();
+    const QDate date0 = QDate::fromString(citernesTable->item(row,6)->text(), "yyyy-MM-dd");
+
+    QDialog dlg(this);
+    dlg.setWindowTitle(QString("Éditer citerne %1").arg(id));
+    QFormLayout *form = new QFormLayout();
+    QLineEdit *cap = new QLineEdit(cap0);
+    QLineEdit *vol = new QLineEdit(vol0);
+    QLineEdit *qual = new QLineEdit(qual0);
+    QLineEdit *temp = new QLineEdit(temp0);
+    QDateEdit *last = new QDateEdit(date0.isValid() ? date0 : QDate::currentDate());
+    last->setCalendarPopup(true);
+    form->addRow("Capacité (L):", cap);
+    form->addRow("Volume (L):", vol);
+    form->addRow("Qualité:", qual);
+    form->addRow("Temp (°C):", temp);
+    form->addRow("Dernier remplissage:", last);
+
+    QVBoxLayout *v = new QVBoxLayout(&dlg);
+    v->addLayout(form);
+    QDialogButtonBox *bb = new QDialogButtonBox(QDialogButtonBox::Ok|QDialogButtonBox::Cancel);
+    connect(bb,&QDialogButtonBox::accepted,&dlg,&QDialog::accept);
+    connect(bb,&QDialogButtonBox::rejected,&dlg,&QDialog::reject);
+    v->addWidget(bb);
+
+    if (dlg.exec() != QDialog::Accepted) {
+        return;
+    }
+
+    if (oracleActive && db.isOpen()) {
+        Citerne citerne;
+        citerne.setId(id);
+        citerne.setCapaciteL(cap->text().toDouble());
+        citerne.setVolumeL(vol->text().toDouble());
+        citerne.setQualite(qual->text());
+        citerne.setTemperatureC(temp->text().toDouble());
+        citerne.setDernierRemplissage(last->date());
+
+        QString errorMessage;
+        if (!citerne.modifier(db, &errorMessage)) {
+            QMessageBox::critical(this, "Oracle", "Modification citerne échouée:\n" + errorMessage);
+            return;
+        }
+        loadCiternesFromOracle();
+        return;
+    }
+
+    const double capV = cap->text().toDouble();
+    const double volV = vol->text().toDouble();
+    citernesTable->item(row,1)->setText(QString::number(capV,'f',2));
+    citernesTable->item(row,2)->setText(QString::number(volV,'f',2));
+    citernesTable->setCellWidget(row,3, createProgressWidget(capV > 0 ? int((volV / capV) * 100.0) : 0));
+    citernesTable->item(row,4)->setText(qual->text());
+    citernesTable->item(row,5)->setText(QString::number(temp->text().toDouble(),'f',1));
+    citernesTable->item(row,6)->setText(last->date().toString("yyyy-MM-dd"));
 }
 
 void MainWindow::deleteSelectedCiterne()
@@ -754,7 +1075,20 @@ void MainWindow::deleteSelectedCiterne()
     int row = citernesTable->currentRow();
     if (row<0) { QMessageBox::warning(this,"Avertissement","Sélectionnez une citerne."); return; }
     QMessageBox::StandardButton rep = QMessageBox::question(this,"Confirmer","Supprimer la citerne ?", QMessageBox::Yes|QMessageBox::No);
-    if (rep==QMessageBox::Yes) { citernesTable->removeRow(row); QMessageBox::information(this,"Supprimé","Citerne supprimée."); }
+    if (rep==QMessageBox::Yes) {
+        if (oracleActive && db.isOpen()) {
+            const int id = citernesTable->item(row,0)->text().toInt();
+            QString errorMessage;
+            if (!Citerne::supprimer(db, id, &errorMessage)) {
+                QMessageBox::critical(this, "Oracle", "Suppression citerne échouée:\n" + errorMessage);
+                return;
+            }
+            loadCiternesFromOracle();
+        } else {
+            citernesTable->removeRow(row);
+        }
+        QMessageBox::information(this,"Supprimé","Citerne supprimée.");
+    }
 }
 
 void MainWindow::onFillButtonClicked()
@@ -770,6 +1104,15 @@ void MainWindow::onFillButtonClicked()
     double cap = citernesTable->item(row,1)->text().toDouble();
     double vol = citernesTable->item(row,2)->text().toDouble();
     vol += add; if (vol>cap) vol=cap;
+
+    if (oracleActive && db.isOpen()) {
+        QString errorMessage;
+        if (!Citerne::mettreAJourVolume(db, id, vol, &errorMessage)) {
+            QMessageBox::critical(this, "Oracle", "Remplissage échoué:\n" + errorMessage);
+            return;
+        }
+    }
+
     citernesTable->item(row,2)->setText(QString::number(vol,'f',2));
     int pct = (cap>0)?int((vol/cap)*100.0):0;
     citernesTable->setCellWidget(row,3, createProgressWidget(pct));
@@ -788,6 +1131,15 @@ void MainWindow::onDrainButtonClicked()
     double cap = citernesTable->item(row,1)->text().toDouble();
     double vol = citernesTable->item(row,2)->text().toDouble();
     vol -= rem; if(vol<0) vol=0;
+
+    if (oracleActive && db.isOpen()) {
+        QString errorMessage;
+        if (!Citerne::mettreAJourVolume(db, id, vol, &errorMessage)) {
+            QMessageBox::critical(this, "Oracle", "Vidage échoué:\n" + errorMessage);
+            return;
+        }
+    }
+
     citernesTable->item(row,2)->setText(QString::number(vol,'f',2));
     int pct = (cap>0)?int((vol/cap)*100.0):0;
     citernesTable->setCellWidget(row,3, createProgressWidget(pct));
@@ -871,40 +1223,32 @@ void MainWindow::viewCiterneDetails()
 }
 
 // ============================================================================
-// BLENDING SIMULATOR
+// QUALITY SIMULATOR
 // ============================================================================
 
 void MainWindow::openBlendingSimulator()
 {
     QDialog dlg(this);
-    dlg.setWindowTitle("Simulateur de Mélange (Blending)");
+    dlg.setWindowTitle("Simulateur Qualité");
     dlg.setMinimumWidth(500);
     
     QVBoxLayout *vl = new QVBoxLayout(&dlg);
     
-    QLabel *titleLbl = new QLabel("<b>Sélectionnez les cuves à mélanger:</b>");
+    QLabel *titleLbl = new QLabel("<b>Sélectionnez les citernes à inclure dans l'évaluation:</b>");
     vl->addWidget(titleLbl);
     
-    // Create checkboxes for each citerne
+    // Sélection simple: une coche par citerne
     QList<QCheckBox*> checkboxes;
-    QList<QSpinBox*> proportions;
     
     for (int i = 0; i < citernesTable->rowCount(); ++i) {
         QString citerneId = citernesTable->item(i, 0)->text();
         QHBoxLayout *hbl = new QHBoxLayout();
         
-        QCheckBox *cb = new QCheckBox(QString("Citerne %1").arg(citerneId));
+        const QString qualityText = citernesTable->item(i, 4) ? citernesTable->item(i, 4)->text() : "N/A";
+        QCheckBox *cb = new QCheckBox(QString("Citerne %1 (Qualité: %2)").arg(citerneId, qualityText));
         hbl->addWidget(cb);
         checkboxes.append(cb);
-        
-        QSpinBox *sb = new QSpinBox();
-        sb->setValue(20);
-        sb->setRange(0, 100);
-        sb->setSuffix("%");
-        hbl->addWidget(new QLabel("Part:"));
-        hbl->addWidget(sb);
-        proportions.append(sb);
-        
+
         hbl->addStretch();
         vl->addLayout(hbl);
     }
@@ -915,36 +1259,79 @@ void MainWindow::openBlendingSimulator()
     vl->addWidget(box);
     
     if (dlg.exec() == QDialog::Accepted) {
+        qualitySelectedRows.clear();
+        for (int i = 0; i < checkboxes.size(); ++i) {
+            if (checkboxes[i]->isChecked()) {
+                qualitySelectedRows.append(i);
+            }
+        }
+
+        if (qualitySelectedRows.isEmpty()) {
+            QMessageBox::warning(this, "Simulateur Qualité", "Sélectionnez au moins une citerne.");
+            return;
+        }
         calculateBlendingResult();
     }
 }
 
 void MainWindow::calculateBlendingResult()
 {
-    double totalQuality = 0.0;
+    auto qualityToScore = [](const QString &value) {
+        bool ok = false;
+        const double numeric = value.toDouble(&ok);
+        if (ok) {
+            return numeric * 100.0;
+        }
+
+        const QString v = value.trimmed().toUpper();
+        if (v == "EXTRA") return 95.0;
+        if (v == "PREMIUM") return 90.0;
+        if (v == "A") return 85.0;
+        if (v == "B") return 75.0;
+        if (v == "C") return 65.0;
+        if (v == "FAIBLE") return 50.0;
+        return 70.0;
+    };
+
+    double qualitySum = 0.0;
     double totalVolume = 0.0;
-    int selectedCount = 0;
-    
-    // Simulated result
-    totalQuality = 18.2;  // Average quality after blending
-    totalVolume = 2850.0; // Combined volume
-    selectedCount = 2;
-    
+
+    for (int i = 0; i < qualitySelectedRows.size(); ++i) {
+        const int row = qualitySelectedRows[i];
+        const QString qualityText = citernesTable->item(row, 4) ? citernesTable->item(row, 4)->text() : QString();
+        const double volume = citernesTable->item(row, 2) ? citernesTable->item(row, 2)->text().toDouble() : 0.0;
+        const double score = qualityToScore(qualityText);
+
+        qualitySum += score;
+        totalVolume += volume;
+    }
+
+    const double qualityScore = qualitySum / qualitySelectedRows.size();
+    QString qualityClass = "Faible";
+    if (qualityScore >= 90.0) qualityClass = "Excellente";
+    else if (qualityScore >= 80.0) qualityClass = "Élevée";
+    else if (qualityScore >= 70.0) qualityClass = "Moyenne";
+
     QString result = QString(
         "━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
-        "RÉSULTAT DU MÉLANGE\n"
+        "RÉSULTAT QUALITÉ\n"
         "━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
-        "Nombre de cuves: %1\n"
-        "Volume total: %2 L\n"
-        "Qualité moyenne: %3\n"
+        "Nombre de citernes: %1\n"
+          "Volume total: %2 L\n"
+        "Indice qualité: %3 / 100\n"
+        "Classe qualité: %4\n"
         "━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
-        "✓ Mélange possible\n"
-        "✓ Qualité acceptable\n"
-        "✓ Peu de perte (2.1%)"
-    ).arg(selectedCount).arg(int(totalVolume)).arg(totalQuality, 0, 'f', 1);
+        "✓ Évaluation qualité terminée"
+    ).arg(qualitySelectedRows.size())
+      .arg(int(totalVolume))
+     .arg(qualityScore, 0, 'f', 1)
+     .arg(qualityClass);
     
-    QMessageBox::information(this, "Résultat Blending", result);
-    notificationHistory.append(QString("Blending: %1 L à %2 qualité").arg(int(totalVolume)).arg(totalQuality, 0, 'f', 1));
+    QMessageBox::information(this, "Résultat Qualité", result);
+    notificationHistory.append(QString("Qualité: %1/100 (%2), volume estimé %3 L")
+                               .arg(qualityScore, 0, 'f', 1)
+                               .arg(qualityClass)
+                               .arg(int(totalVolume)));
 }
 
 void MainWindow::performBlending()
@@ -1091,4 +1478,79 @@ void MainWindow::viewFillingHistory()
 {
     // Implementation for viewing filling history
     QMessageBox::information(this, "Historique", "Historique des remplissages affichés.");
+}
+
+bool MainWindow::promptAndTestOracleConnection()
+{
+    QDialog dlg(this);
+    dlg.setWindowTitle("Connexion Oracle (ODBC)");
+    dlg.setModal(true);
+    dlg.setMinimumSize(430, 240);
+
+    QFormLayout *form = new QFormLayout();
+    QLineEdit *dsnEdit = new QLineEdit("projetqt");
+    QLineEdit *userEdit = new QLineEdit("awss");
+    QLineEdit *passEdit = new QLineEdit("123");
+    passEdit->setEchoMode(QLineEdit::Password);
+
+    form->addRow("DSN ODBC:", dsnEdit);
+    form->addRow("Utilisateur:", userEdit);
+    form->addRow("Mot de passe:", passEdit);
+
+    QLabel *hint = new QLabel("Saisis le DSN ODBC Oracle puis clique sur OK pour tester la connexion.");
+    hint->setWordWrap(true);
+
+    QVBoxLayout *layout = new QVBoxLayout(&dlg);
+    layout->addWidget(hint);
+    layout->addLayout(form);
+
+    QDialogButtonBox *buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel);
+    connect(buttons, &QDialogButtonBox::accepted, &dlg, &QDialog::accept);
+    connect(buttons, &QDialogButtonBox::rejected, &dlg, &QDialog::reject);
+    layout->addWidget(buttons);
+
+    if (dlg.exec() != QDialog::Accepted) {
+        return false;
+    }
+
+    const QString dsn = dsnEdit->text().trimmed();
+    const QString user = userEdit->text().trimmed();
+    const QString pass = passEdit->text();
+
+    QString lastError;
+    Connection *cx = Connection::instance();
+    const bool connected = cx && cx->openOdbcConnection(dsn, user, pass, lastError);
+    if (connected) {
+        db = cx->database();
+        QMessageBox::information(this,
+                                 "Oracle",
+                                 "Connexion Oracle/ODBC réussie.\n"
+                                 "DSN utilisé: " + dsn +
+                                 "\nTest SELECT 1 FROM DUAL = 1");
+        return true;
+    }
+
+    QMessageBox::critical(this,
+                          "Oracle",
+                          "Échec de connexion Oracle via ODBC.\n"
+                          "Vérifie le DSN, l'utilisateur/mot de passe et le driver ODBC Oracle.\n\n"
+                          "Dernière erreur: " + lastError +
+                          "\n\nDrivers Qt disponibles: " + QSqlDatabase::drivers().join(", "));
+    return false;
+}
+
+void MainWindow::updateDatabaseStatusLabel()
+{
+    if (!dbStatusLabel) {
+        return;
+    }
+
+    if (db.isValid() && db.isOpen()) {
+        const QString target = db.databaseName();
+        dbStatusLabel->setText("Base Oracle: connectée\n" + target + "\nUtilisateur: " + db.userName());
+        dbStatusLabel->setStyleSheet("padding:8px; border-radius:8px; background:#2E574B; color:#FFFFFF;");
+    } else {
+        dbStatusLabel->setText("Base Oracle: non connectée\nMode démonstration actif");
+        dbStatusLabel->setStyleSheet("padding:8px; border-radius:8px; background:#5C2B2B; color:#FFFFFF;");
+    }
 }
