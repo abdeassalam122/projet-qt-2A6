@@ -1,5 +1,6 @@
 #include "mainwindow.h"
 #include "connexion.h"
+#include "client.h"
 #include "citerne.h"
 
 #include <QMessageBox>
@@ -11,6 +12,7 @@
 #include <QInputDialog>
 #include <QVBoxLayout>
 #include <QHBoxLayout>
+#include <QGridLayout>
 #include <QProgressBar>
 #include <QCheckBox>
 #include <QSpinBox>
@@ -20,6 +22,96 @@
 #include <QSqlQuery>
 #include <QSqlError>
 #include <QSqlRecord>
+#include <QRegularExpression>
+#include <QRegularExpressionValidator>
+#include <QDoubleValidator>
+#include <QMap>
+#include <QDateTime>
+#include <QPainter>
+#include <numeric>
+
+namespace {
+
+QPixmap buildDonutChartPixmap(const QSize &size,
+                              const QList<int> &values,
+                              const QList<QColor> &colors,
+                              const QString &centerValue,
+                              const QString &centerLabel)
+{
+    QPixmap px(size);
+    px.fill(Qt::transparent);
+
+    QPainter p(&px);
+    p.setRenderHint(QPainter::Antialiasing, true);
+
+    const int side = qMin(size.width(), size.height());
+    const QRectF rect((size.width() - side) / 2.0 + 8.0,
+                      (size.height() - side) / 2.0 + 8.0,
+                      side - 16.0,
+                      side - 16.0);
+
+    const int total = std::accumulate(values.begin(), values.end(), 0);
+    const qreal outerRadius = rect.width() * 0.5;
+    const qreal innerRadius = outerRadius * 0.57;
+    const QPointF c = rect.center();
+    QRectF hole(c.x() - innerRadius, c.y() - innerRadius, innerRadius * 2.0, innerRadius * 2.0);
+
+    // Background donut base ring.
+    p.setPen(Qt::NoPen);
+    p.setBrush(QColor("#E6ECE9"));
+    p.drawEllipse(rect);
+
+    if (total <= 0) {
+        p.setBrush(QColor("#F7F9F8"));
+        p.drawEllipse(hole);
+        return px;
+    }
+
+    int startAngle = 90 * 16;
+    for (int i = 0; i < values.size() && i < colors.size(); ++i) {
+        if (values[i] <= 0) {
+            continue;
+        }
+        const qreal ratio = qreal(values[i]) / qreal(total);
+        int span = qRound(ratio * 360.0 * 16.0);
+        if (span <= 0) {
+            continue;
+        }
+
+        // Keep small spacing between slices.
+        const int gap = 2 * 16;
+        const int drawSpan = qMax(0, span - gap);
+        p.setBrush(colors[i]);
+        p.drawPie(rect, startAngle, -drawSpan);
+        startAngle -= span;
+    }
+
+    p.setBrush(QColor("#F7F9F8"));
+    p.setPen(Qt::NoPen);
+    p.drawEllipse(hole);
+
+    QFont valueFont("Segoe UI", 24, QFont::Black);
+    QFont labelFont("Segoe UI", 12, QFont::DemiBold);
+    p.setPen(QColor("#0A2E2A"));
+    p.setFont(valueFont);
+    p.drawText(hole.adjusted(0, -12, 0, -4), Qt::AlignCenter, centerValue);
+    p.setPen(QColor("#2F4E49"));
+    p.setFont(labelFont);
+    p.drawText(hole.adjusted(0, 18, 0, 8), Qt::AlignCenter, centerLabel);
+
+    return px;
+}
+
+QString formatLegendLine(const QString &name, int value, int total)
+{
+    if (total <= 0) {
+        return QString("%1: 0 (0%)").arg(name);
+    }
+    const int pct = qRound((double(value) * 100.0) / double(total));
+    return QString("%1: %2 (%3%)").arg(name).arg(value).arg(pct);
+}
+
+} // namespace
 
 // ============================================================================
 // CONSTRUCTOR / DESTRUCTOR
@@ -82,7 +174,7 @@ void MainWindow::setupUI()
     moduleTabs->addTab("Clients");
     moduleTabs->addTab("Citernes");
     moduleTabs->addTab("Réception");
-    moduleTabs->addTab("Facturation");
+    moduleTabs->addTab("Extraction");
     contentLayout->addWidget(moduleTabs, 0);
 
     stackedWidget = new QStackedWidget();
@@ -96,7 +188,7 @@ void MainWindow::setupUI()
     createClientsPage();
     createCiternesPage();
     createReceptionPage();
-    createFacturationPage();
+    createExtractionPage();
     createStatisticsPage();
 
     // Default page = clients
@@ -136,9 +228,9 @@ QWidget* MainWindow::createSideBar()
     btnClients = new QPushButton("Clients");
     btnCiternes = new QPushButton("Citernes");
     btnReception = new QPushButton("Réception");
-    btnFacturation = new QPushButton("Facturation");
+    btnExtraction = new QPushButton("Extraction");
 
-    QList<QPushButton*> buttons = {btnClients, btnCiternes, btnReception, btnFacturation};
+    QList<QPushButton*> buttons = {btnClients, btnCiternes, btnReception, btnExtraction};
     for (QPushButton *b : buttons) {
         b->setCheckable(true);
         b->setCursor(Qt::PointingHandCursor);
@@ -151,7 +243,7 @@ QWidget* MainWindow::createSideBar()
     connect(btnClients, &QPushButton::clicked, this, &MainWindow::switchToClients);
     connect(btnCiternes, &QPushButton::clicked, this, &MainWindow::switchToCiternes);
     connect(btnReception, &QPushButton::clicked, this, &MainWindow::switchToReception);
-    connect(btnFacturation, &QPushButton::clicked, this, &MainWindow::switchToFacturation);
+    connect(btnExtraction, &QPushButton::clicked, this, &MainWindow::switchToExtraction);
 
     dbStatusLabel = new QLabel("Base Oracle: non connectée");
     dbStatusLabel->setObjectName("dbStatusLabel");
@@ -188,10 +280,10 @@ void MainWindow::switchToReception()
     if (moduleTabs) moduleTabs->setCurrentIndex(2);
 }
 
-void MainWindow::switchToFacturation()
+void MainWindow::switchToExtraction()
 {
-    stackedWidget->setCurrentWidget(facturationPage);
-    if (btnFacturation) btnFacturation->setChecked(true);
+    stackedWidget->setCurrentWidget(extractionPage);
+    if (btnExtraction) btnExtraction->setChecked(true);
     if (moduleTabs) moduleTabs->setCurrentIndex(3);
 }
 
@@ -201,6 +293,7 @@ void MainWindow::switchToFacturation()
 void MainWindow::createClientsPage()
 {
     clientsPage = new QWidget();
+    clientsPage->setObjectName("clientsPage");
     QVBoxLayout *mainLay = new QVBoxLayout(clientsPage);
     mainLay->setContentsMargins(12,12,12,12);
     mainLay->setSpacing(8);
@@ -211,6 +304,7 @@ void MainWindow::createClientsPage()
 
     // Controls + table
     QWidget *content = new QWidget();
+    content->setObjectName("moduleCard");
     QVBoxLayout *contentLay = new QVBoxLayout(content);
     contentLay->setContentsMargins(8,8,8,8);
     contentLay->setSpacing(10);
@@ -224,14 +318,17 @@ void MainWindow::createClientsPage()
     connect(searchBox, &QLineEdit::textChanged, this, &MainWindow::searchClients);
 
     sortButton = new QPushButton("Trier");
+    sortButton->setProperty("role", "secondary");
     sortButton->setFixedSize(80,34);
     connect(sortButton, &QPushButton::clicked, this, &MainWindow::sortClients);
 
     exportButton = new QPushButton("Exporter");
+    exportButton->setProperty("role", "secondary");
     exportButton->setFixedSize(100,34);
     connect(exportButton, &QPushButton::clicked, this, &MainWindow::exportClients);
 
     statsButton = new QPushButton("Statistiques");
+    statsButton->setProperty("role", "accent");
     statsButton->setFixedSize(110,34);
     connect(statsButton, &QPushButton::clicked, this, &MainWindow::showStatisticsView);
 
@@ -255,24 +352,32 @@ void MainWindow::createClientsPage()
     clientsTable->setSelectionBehavior(QAbstractItemView::SelectRows);
     clientsTable->setEditTriggers(QAbstractItemView::NoEditTriggers);
     clientsTable->verticalHeader()->setVisible(false);
+    clientsTable->verticalHeader()->setDefaultSectionSize(44);
+    clientsTable->verticalHeader()->setMinimumSectionSize(40);
+    clientsTable->setAlternatingRowColors(true);
+    clientsTable->setShowGrid(false);
     clientsTable->setObjectName("clientsTable");
     contentLay->addWidget(clientsTable);
 
     // Action buttons
     QHBoxLayout *actions = new QHBoxLayout();
     addButton = new QPushButton("+ Ajouter");
+    addButton->setProperty("role", "primary");
     addButton->setFixedSize(120,36);
     connect(addButton, &QPushButton::clicked, this, &MainWindow::showAddClientDialog);
 
     editButton = new QPushButton("✎ Éditer");
+    editButton->setProperty("role", "secondary");
     editButton->setFixedSize(100,36);
     connect(editButton, &QPushButton::clicked, this, &MainWindow::editSelectedClient);
 
     viewButton = new QPushButton("👁 Voir");
+    viewButton->setProperty("role", "secondary");
     viewButton->setFixedSize(100,36);
     connect(viewButton, &QPushButton::clicked, this, &MainWindow::viewSelectedClient);
 
     deleteButton = new QPushButton("🗑 Supprimer");
+    deleteButton->setProperty("role", "danger");
     deleteButton->setFixedSize(120,36);
     connect(deleteButton, &QPushButton::clicked, this, &MainWindow::deleteSelectedClient);
 
@@ -295,6 +400,7 @@ void MainWindow::createClientsPage()
 void MainWindow::createCiternesPage()
 {
     citernesPage = new QWidget();
+    citernesPage->setObjectName("citernesPage");
     QVBoxLayout *mainLay = new QVBoxLayout(citernesPage);
     mainLay->setContentsMargins(12,12,12,12);
     mainLay->setSpacing(8);
@@ -304,6 +410,7 @@ void MainWindow::createCiternesPage()
 
     // Content
     QWidget *content = new QWidget();
+    content->setObjectName("moduleCard");
     QVBoxLayout *contentLay = new QVBoxLayout(content);
     contentLay->setContentsMargins(8,8,8,8);
     contentLay->setSpacing(10);
@@ -311,6 +418,7 @@ void MainWindow::createCiternesPage()
     // Search row for citernes (only search input)
     QHBoxLayout *ctrl = new QHBoxLayout();
     searchBoxCiternes = new QLineEdit();
+    searchBoxCiternes->setObjectName("searchBoxCiternes");
     searchBoxCiternes->setPlaceholderText("Rechercher par ID / Qualité ...");
     searchBoxCiternes->setFixedHeight(34);
     connect(searchBoxCiternes, &QLineEdit::textChanged, this, &MainWindow::searchCiternes);
@@ -322,14 +430,17 @@ void MainWindow::createCiternesPage()
     // Advanced features row
     QHBoxLayout *advCtrl = new QHBoxLayout();
     blendingBtn = new QPushButton("🧪 Simulateur Qualité");
+    blendingBtn->setProperty("role", "accent");
     blendingBtn->setFixedSize(180,34);
     connect(blendingBtn, &QPushButton::clicked, this, &MainWindow::openBlendingSimulator);
     
     alertsBtn = new QPushButton("⚠️ Alertes & Notifications");
+    alertsBtn->setProperty("role", "secondary");
     alertsBtn->setFixedSize(180,34);
     connect(alertsBtn, &QPushButton::clicked, this, &MainWindow::showNotifications);
     
     QPushButton *maintBtn = new QPushButton("🔧 Maintenance Prédictive");
+    maintBtn->setProperty("role", "secondary");
     maintBtn->setFixedSize(180,34);
     connect(maintBtn, &QPushButton::clicked, this, &MainWindow::showEquipmentStatus);
     
@@ -349,24 +460,32 @@ void MainWindow::createCiternesPage()
     citernesTable->setSelectionBehavior(QAbstractItemView::SelectRows);
     citernesTable->setEditTriggers(QAbstractItemView::NoEditTriggers);
     citernesTable->verticalHeader()->setVisible(false);
+    citernesTable->verticalHeader()->setDefaultSectionSize(44);
+    citernesTable->verticalHeader()->setMinimumSectionSize(40);
+    citernesTable->setAlternatingRowColors(true);
+    citernesTable->setShowGrid(false);
     citernesTable->setObjectName("citernesTable");
     contentLay->addWidget(citernesTable);
 
     // action buttons below table just like clients
     QHBoxLayout *actions = new QHBoxLayout();
     addCiterneBtn = new QPushButton("+ Ajouter");
+    addCiterneBtn->setProperty("role", "primary");
     addCiterneBtn->setFixedSize(120,36);
     connect(addCiterneBtn, &QPushButton::clicked, this, &MainWindow::showAddCiterneDialog);
 
     editCiterneBtn = new QPushButton("✎ Éditer");
+    editCiterneBtn->setProperty("role", "secondary");
     editCiterneBtn->setFixedSize(100,36);
     connect(editCiterneBtn, &QPushButton::clicked, this, &MainWindow::editSelectedCiterne);
 
     detailsCiterneBtn = new QPushButton("👁 Voir");
+    detailsCiterneBtn->setProperty("role", "secondary");
     detailsCiterneBtn->setFixedSize(100,36);
     connect(detailsCiterneBtn, &QPushButton::clicked, this, &MainWindow::viewCiterneDetails);
 
     deleteCiterneBtn = new QPushButton("🗑 Supprimer");
+    deleteCiterneBtn->setProperty("role", "danger");
     deleteCiterneBtn->setFixedSize(120,36);
     connect(deleteCiterneBtn, &QPushButton::clicked, this, &MainWindow::deleteSelectedCiterne);
 
@@ -382,7 +501,7 @@ void MainWindow::createCiternesPage()
 }
 
 // ============================================================================
-// RECEPTION and FACTURATION pages (simple placeholders to extend later)
+// RECEPTION and EXTRACTION pages (simple placeholders to extend later)
 // ============================================================================
 void MainWindow::createReceptionPage()
 {
@@ -396,16 +515,16 @@ void MainWindow::createReceptionPage()
     stackedWidget->addWidget(receptionPage);
 }
 
-void MainWindow::createFacturationPage()
+void MainWindow::createExtractionPage()
 {
-    facturationPage = new QWidget();
-    QVBoxLayout *l = new QVBoxLayout(facturationPage);
-    l->addWidget(createHeaderWidget("Facturation"));
-    QLabel *lbl = new QLabel("Module Facturation - à implémenter");
+    extractionPage = new QWidget();
+    QVBoxLayout *l = new QVBoxLayout(extractionPage);
+    l->addWidget(createHeaderWidget("Extraction"));
+    QLabel *lbl = new QLabel("Module Extraction - à implémenter");
     lbl->setWordWrap(true);
     l->addWidget(lbl);
     l->addStretch();
-    stackedWidget->addWidget(facturationPage);
+    stackedWidget->addWidget(extractionPage);
 }
 
 // ============================================================================
@@ -413,14 +532,166 @@ void MainWindow::createFacturationPage()
 // ============================================================================
 void MainWindow::createStatisticsPage()
 {
-    QWidget *stats = new QWidget();
-    QVBoxLayout *m = new QVBoxLayout(stats);
-    m->addWidget(createHeaderWidget("Statistiques"));
-    QLabel *lbl = new QLabel("Statistiques générales (placeholder).");
-    m->addWidget(lbl);
-    m->addStretch();
-    // We add statisticsPage to stack so showStatisticsView can show it
-    stackedWidget->addWidget(stats);
+    statisticsPage = new QWidget();
+    statisticsPage->setObjectName("statisticsPage");
+    QVBoxLayout *mainLayout = new QVBoxLayout(statisticsPage);
+    mainLayout->setContentsMargins(12, 12, 12, 12);
+    mainLayout->setSpacing(12);
+
+    mainLayout->addWidget(createHeaderWidget("Statistiques Clients"));
+
+    QFrame *hero = new QFrame();
+    hero->setObjectName("statsHero");
+    QHBoxLayout *heroLayout = new QHBoxLayout(hero);
+    heroLayout->setContentsMargins(18, 14, 18, 14);
+    heroLayout->setSpacing(12);
+
+    QVBoxLayout *heroText = new QVBoxLayout();
+    heroText->setSpacing(2);
+    QLabel *heroTitle = new QLabel("Vue d'ensemble commerciale");
+    heroTitle->setObjectName("statsHeroTitle");
+    QLabel *heroSubtitle = new QLabel("KPI clients, activité récente et qualité des profils.");
+    heroSubtitle->setObjectName("statsHeroSubtitle");
+    heroText->addWidget(heroTitle);
+    heroText->addWidget(heroSubtitle);
+
+    QLabel *heroChip = new QLabel("Temps réel");
+    heroChip->setObjectName("statsHeroChip");
+
+    heroLayout->addLayout(heroText);
+    heroLayout->addStretch();
+    heroLayout->addWidget(heroChip);
+    mainLayout->addWidget(hero);
+
+    QWidget *content = new QWidget();
+    content->setObjectName("statsSurface");
+    QVBoxLayout *contentLayout = new QVBoxLayout(content);
+    contentLayout->setContentsMargins(14, 14, 14, 14);
+    contentLayout->setSpacing(14);
+
+    QGridLayout *cardsGrid = new QGridLayout();
+    cardsGrid->setHorizontalSpacing(10);
+    cardsGrid->setVerticalSpacing(10);
+
+    auto createStatCard = [&](const QString &title, QLabel **valueLabel, const QString &tone) {
+        QFrame *card = new QFrame();
+        card->setObjectName("statCard");
+        card->setProperty("tone", tone);
+        QVBoxLayout *lay = new QVBoxLayout(card);
+        lay->setContentsMargins(12, 10, 12, 10);
+        lay->setSpacing(3);
+        QLabel *titleLabel = new QLabel(title);
+        titleLabel->setObjectName("statCardTitle");
+        QLabel *val = new QLabel("0");
+        val->setObjectName("statCardValue");
+        lay->addWidget(titleLabel);
+        lay->addWidget(val);
+        lay->addStretch();
+        *valueLabel = val;
+        return card;
+    };
+
+    cardsGrid->addWidget(createStatCard("Total clients", &statsTotalClientsValue, "primary"), 0, 0);
+    cardsGrid->addWidget(createStatCard("Clients actifs", &statsActiveClientsValue, "success"), 0, 1);
+    cardsGrid->addWidget(createStatCard("Clients inactifs", &statsInactiveClientsValue, "danger"), 0, 2);
+    cardsGrid->addWidget(createStatCard("Nouveaux ce mois", &statsNewThisMonthValue, "accent"), 1, 0);
+    cardsGrid->addWidget(createStatCard("Profils complets", &statsCompleteProfilesValue, "neutral"), 1, 1);
+
+    QFrame *cityCard = new QFrame();
+    cityCard->setObjectName("statsInsightCard");
+    QVBoxLayout *cityLay = new QVBoxLayout(cityCard);
+    cityLay->setContentsMargins(12, 10, 12, 10);
+    QLabel *cityTitle = new QLabel("Ville la plus représentée");
+    cityTitle->setObjectName("statsInsightTitle");
+    statsTopCityValue = new QLabel("N/A");
+    statsTopCityValue->setObjectName("statsInsightValue");
+    cityLay->addWidget(cityTitle);
+    cityLay->addWidget(statsTopCityValue);
+    cityLay->addStretch();
+    cardsGrid->addWidget(cityCard, 1, 2);
+
+    QFrame *analyticsRow = new QFrame();
+    analyticsRow->setObjectName("statsRow");
+    QHBoxLayout *analyticsLayout = new QHBoxLayout(analyticsRow);
+    analyticsLayout->setContentsMargins(0, 0, 0, 0);
+    analyticsLayout->setSpacing(10);
+
+    QFrame *breakdownCard = new QFrame();
+    breakdownCard->setObjectName("statsInsightCard");
+    QVBoxLayout *breakLay = new QVBoxLayout(breakdownCard);
+    breakLay->setContentsMargins(12, 10, 12, 10);
+    QLabel *breakTitle = new QLabel("Répartition par statut");
+    breakTitle->setObjectName("statsInsightTitle");
+    statsStatusBreakdownValue = new QLabel("Aucune donnée");
+    statsStatusBreakdownValue->setWordWrap(true);
+    statsStatusBreakdownValue->setObjectName("statsBreakdownValue");
+    breakLay->addWidget(breakTitle);
+    breakLay->addWidget(statsStatusBreakdownValue);
+
+    backFromStatsButton = new QPushButton("Retour à la liste clients");
+    backFromStatsButton->setProperty("role", "secondary");
+    backFromStatsButton->setFixedHeight(34);
+    connect(backFromStatsButton, &QPushButton::clicked, this, &MainWindow::showMainListView);
+    breakLay->addStretch();
+    breakLay->addWidget(backFromStatsButton, 0, Qt::AlignRight);
+
+    QFrame *donutCard = new QFrame();
+    donutCard->setObjectName("statsInsightCard");
+    donutCard->setMinimumWidth(360);
+    donutCard->setMinimumHeight(330);
+    QVBoxLayout *donutLay = new QVBoxLayout(donutCard);
+    donutLay->setContentsMargins(12, 10, 12, 10);
+    donutLay->setSpacing(6);
+
+    QLabel *donutTitle = new QLabel("Distribution des statuts");
+    donutTitle->setObjectName("statsInsightTitle");
+    donutLay->addWidget(donutTitle);
+
+    statsDonutChartLabel = new QLabel();
+    statsDonutChartLabel->setObjectName("statsDonutChart");
+    statsDonutChartLabel->setFixedSize(210, 210);
+    statsDonutChartLabel->setAlignment(Qt::AlignCenter);
+    donutLay->addWidget(statsDonutChartLabel, 0, Qt::AlignCenter);
+
+    auto createLegendItem = [&](const QString &colorHex, const QString &baseText, QLabel **valueOut) {
+        QWidget *item = new QWidget();
+        item->setObjectName("statsLegendItem");
+        QHBoxLayout *hl = new QHBoxLayout(item);
+        hl->setContentsMargins(8, 6, 8, 6);
+        hl->setSpacing(8);
+
+        QLabel *dot = new QLabel();
+        dot->setFixedSize(10, 10);
+        dot->setStyleSheet(QString("background:%1; border-radius:5px;").arg(colorHex));
+
+        QLabel *txt = new QLabel(baseText);
+        txt->setObjectName("statsLegendValue");
+        hl->addWidget(dot);
+        hl->addWidget(txt, 1);
+
+        *valueOut = txt;
+        return item;
+    };
+
+    QGridLayout *legendGrid = new QGridLayout();
+    legendGrid->setHorizontalSpacing(8);
+    legendGrid->setVerticalSpacing(8);
+    legendGrid->addWidget(createLegendItem("#1F9FE0", "Non défini", &statsLegendUndefinedValue), 0, 0);
+    legendGrid->addWidget(createLegendItem("#FF3A3A", "Inactif", &statsLegendInactiveValue), 0, 1);
+    legendGrid->addWidget(createLegendItem("#38C86A", "Actif", &statsLegendActiveValue), 1, 0);
+    legendGrid->addWidget(createLegendItem("#FF7A00", "Autre", &statsLegendOtherValue), 1, 1);
+    donutLay->addLayout(legendGrid);
+    donutLay->addStretch();
+
+    analyticsLayout->addWidget(donutCard, 1);
+    analyticsLayout->addWidget(breakdownCard, 1);
+
+    contentLayout->addLayout(cardsGrid);
+    contentLayout->addWidget(analyticsRow);
+
+    mainLayout->addWidget(content);
+    stackedWidget->addWidget(statisticsPage);
+    updateClientStatistics();
 }
 
 // ============================================================================
@@ -447,24 +718,70 @@ QWidget* MainWindow::createHeaderWidget(const QString &title)
 void MainWindow::applyStyles()
 {
     QString qss = R"(
-        QWidget { background: #F7F8FA; font-family: 'Segoe UI', Roboto, Arial; color: #2B2B2B; }
-        #sideBar { background: #1B2F2A; }
+        QWidget { background: #F3F4EE; font-family: 'Segoe UI', 'Trebuchet MS', 'Candara', 'Verdana'; color: #1A2B28; }
+        QLabel { background: transparent; color: #1A2B28; }
+        #clientsPage, #citernesPage, #statisticsPage { background: qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 #F7F4EB, stop:1 #EEF6F4); }
+        #sideBar { background: #102B2A; border-right: 1px solid #2B4945; }
         #sideBar QLabel { background: transparent; }
-        #sideBrand { color: #EAF5F0; font-size: 22px; font-weight: 700; letter-spacing: 0.5px; }
-        #sideSubtitle { color: #9CB5AD; font-size: 11px; text-transform: uppercase; letter-spacing: 1px; }
-        #dbStatusLabel { background: #24433A; color: #EAF5F0; font-size: 11px; }
-        QPushButton[nav="true"] { text-align: left; padding: 10px 12px; border-radius: 10px; color: #EAF5F0; background: transparent; }
-        QPushButton[nav="true"]:hover { background: #24433A; }
-        QPushButton[nav="true"]:checked { background: #2E574B; color: #FFFFFF; font-weight: 600; }
-        #pageHeader { background-color:#0A5F58; }
+        #sideBrand { color: #F9EEE0; font-size: 22px; font-weight: 800; letter-spacing: 0.8px; }
+        #sideSubtitle { color: #9CC4BE; font-size: 11px; text-transform: uppercase; letter-spacing: 1px; }
+        #dbStatusLabel { background: #1C3F3B; color: #EAF5F0; font-size: 11px; border: 1px solid #2A5A54; }
+        QPushButton[nav="true"] { text-align: left; padding: 10px 12px; border-radius: 10px; color: #EAF5F0; background: transparent; border: 1px solid transparent; }
+        QPushButton[nav="true"]:hover { background: #1F4843; border: 1px solid #2E6A62; }
+        QPushButton[nav="true"]:checked { background: #2B5D56; color: #FFFFFF; font-weight: 700; border: 1px solid #4D8A80; }
+        #pageHeader { background-color:#0D5B52; border-radius: 10px; }
         #moduleTabs { background: transparent; border: none; }
         QTabBar { border: none; }
-        QTabBar::tab { background: #E8F1EE; color: #24433A; padding: 8px 14px; margin-right: 6px; border: none; border-top-left-radius: 8px; border-top-right-radius: 8px; }
-        QTabBar::tab:selected { background: #0A5F58; color: #FFFFFF; border: none; }
-This branch is up to date with citerne.        #searchBox, #searchBoxCiternes { border:1px solid #A3CAD3; border-radius:6px; padding:6px; }
-        QPushButton { border-radius:6px; padding:6px 10px; }
-        QTableWidget { background: white; border: 1px solid #E8E8E8; }
-        QHeaderView::section { background: #0A5F58; color: white; padding:8px; }
+        QTabBar::tab { background: #E8E8DF; color: #21423D; padding: 8px 16px; margin-right: 6px; border: 1px solid #CBD8D4; border-top-left-radius: 9px; border-top-right-radius: 9px; }
+        QTabBar::tab:selected { background: #0D5B52; color: #FFFFFF; border: 1px solid #0D5B52; }
+        #moduleCard { background: #FFFEFB; border: 1px solid #D8E2DE; border-radius: 12px; }
+        #searchBox, #searchBoxCiternes { border:1px solid #A8BDB6; border-radius:8px; padding:7px 10px; background: #FBFCFA; selection-background-color: #0D5B52; }
+        #searchBox:focus, #searchBoxCiternes:focus { border: 1px solid #0D5B52; background: #FFFFFF; }
+        QPushButton { border-radius:8px; padding:7px 12px; border: 1px solid #C8D8D3; background: #F3F7F5; }
+        QPushButton:hover { background: #E7EFEC; }
+        QPushButton[role="primary"] { background: #0D5B52; color: #FFFFFF; border: 1px solid #0D5B52; font-weight: 700; }
+        QPushButton[role="primary"]:hover { background: #0A4B44; }
+        QPushButton[role="secondary"] { background: #EEF5F2; color: #22443E; border: 1px solid #BFD4CC; font-weight: 600; }
+        QPushButton[role="secondary"]:hover { background: #E0ECE8; }
+        QPushButton[role="accent"] { background: #C67D37; color: #FFFFFF; border: 1px solid #B06E2F; font-weight: 700; }
+        QPushButton[role="accent"]:hover { background: #B06E2F; }
+        QPushButton[role="danger"] { background: #8A3131; color: #FFFFFF; border: 1px solid #772727; font-weight: 700; }
+        QPushButton[role="danger"]:hover { background: #742323; }
+        #tableActionsCell { background: transparent; }
+        #tableActionsCell QPushButton { border-radius: 6px; padding: 1px 8px; min-height: 28px; max-height: 28px; font-size: 11px; font-weight: 700; border: 1px solid transparent; }
+        #tableActionsCell QPushButton[tableAction="view"] { background: #D9ECE8; color: #0E4A44; border-color: #A7CCC3; }
+        #tableActionsCell QPushButton[tableAction="view"]:hover { background: #CBE4DF; }
+        #tableActionsCell QPushButton[tableAction="edit"] { background: #E5E8FB; color: #2F3E8A; border-color: #C3CCF0; }
+        #tableActionsCell QPushButton[tableAction="edit"]:hover { background: #DADFF7; }
+        #tableActionsCell QPushButton[tableAction="danger"] { background: #F7DDDD; color: #872525; border-color: #E6B4B4; }
+        #tableActionsCell QPushButton[tableAction="danger"]:hover { background: #F2CECE; }
+        #tableActionsCell QPushButton[tableAction="fill"] { background: #DDF1DE; color: #1E6B2A; border-color: #B7DEB9; }
+        #tableActionsCell QPushButton[tableAction="fill"]:hover { background: #CDEACF; }
+        #tableActionsCell QPushButton[tableAction="drain"] { background: #F8E6CE; color: #8B5A16; border-color: #E7CCA4; }
+        #tableActionsCell QPushButton[tableAction="drain"]:hover { background: #F3DCBB; }
+        #statsHero { background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #124E48, stop:1 #1C6A60); border: 1px solid #2F7D72; border-radius: 12px; }
+        #statsHeroTitle { color: #FFFFFF; font-size: 18px; font-weight: 900; }
+        #statsHeroSubtitle { color: #E4F2EE; font-size: 12px; font-weight: 600; }
+        #statsHeroChip { background: #E8F4F1; color: #0C4E47; font-size: 11px; font-weight: 800; border-radius: 10px; padding: 4px 9px; border: 1px solid #C6E0D9; }
+        #statsSurface { background: #FFFEFB; border: 1px solid #D8E2DE; border-radius: 12px; }
+        #statCard { background: #FFFFFF; border: 1px solid #DFE8E4; border-radius: 10px; }
+        #statCard[tone="primary"] { border-left: 4px solid #1F6A63; }
+        #statCard[tone="success"] { border-left: 4px solid #2F8652; }
+        #statCard[tone="danger"] { border-left: 4px solid #9A3D3D; }
+        #statCard[tone="accent"] { border-left: 4px solid #C67D37; }
+        #statCard[tone="neutral"] { border-left: 4px solid #51656A; }
+        #statCardTitle { color: #38504B; font-size: 13px; font-weight: 800; }
+        #statCardValue { color: #0E3D37; font-size: 28px; font-weight: 900; }
+        #statsInsightCard { background: #FFFFFF; border: 1px solid #DFE8E4; border-radius: 10px; }
+        #statsInsightTitle { color: #36514B; font-size: 14px; font-weight: 800; }
+        #statsInsightValue { color: #0C4F47; font-size: 26px; font-weight: 900; }
+        #statsBreakdownValue { color: #172927; font-size: 14px; font-weight: 700; line-height: 1.35; }
+        #statsDonutChart { background: transparent; }
+        #statsLegendItem { background: #F6FAF8; border: 1px solid #E2ECE8; border-radius: 8px; }
+        #statsLegendValue { color: #1E3431; font-size: 12px; font-weight: 800; }
+        QTableWidget { background: #FFFFFF; border: 1px solid #DCE5E1; border-radius: 10px; alternate-background-color: #F6FBF9; gridline-color: #ECF2F0; selection-background-color: #D6EAE3; selection-color: #0D2F2A; }
+        QTableWidget::item { padding: 6px; border-bottom: 1px solid #EDF2F0; }
+        QHeaderView::section { background: #114E47; color: white; padding: 9px; border: none; font-weight: 700; }
     )";
     setStyleSheet(qss);
 }
@@ -495,6 +812,7 @@ void MainWindow::populateClientsSampleData()
         clientsTable->setCellWidget(i,7, createClientActionsWidget(c.id));
     }
     clientsTable->resizeColumnsToContents();
+    updateClientStatistics();
 }
 
 // ============================================================================
@@ -550,47 +868,67 @@ bool MainWindow::setupOracleSchema()
 
     QString lastError;
     const QStringList ddl = {
-        "BEGIN EXECUTE IMMEDIATE 'CREATE TABLE clients_app ("
-        "id NUMBER PRIMARY KEY, "
-        "nom VARCHAR2(120) NOT NULL, "
-        "email VARCHAR2(180), "
-        "telephone VARCHAR2(40), "
-        "adresse VARCHAR2(240), "
-        "inscrit_le DATE DEFAULT SYSDATE NOT NULL, "
-        "statut VARCHAR2(30))'; "
+        "BEGIN EXECUTE IMMEDIATE 'DROP TRIGGER TRG_CLIENTS_APP_BI'; "
+        "EXCEPTION WHEN OTHERS THEN IF SQLCODE != -4080 THEN RAISE; END IF; END;",
+
+        "BEGIN EXECUTE IMMEDIATE 'DROP TRIGGER TRG_CITERNES_APP_BI'; "
+        "EXCEPTION WHEN OTHERS THEN IF SQLCODE != -4080 THEN RAISE; END IF; END;",
+
+        "BEGIN EXECUTE IMMEDIATE 'DROP SEQUENCE SEQ_CLIENTS_APP'; "
+        "EXCEPTION WHEN OTHERS THEN IF SQLCODE != -2289 THEN RAISE; END IF; END;",
+
+        "BEGIN EXECUTE IMMEDIATE 'DROP SEQUENCE SEQ_CITERNES_APP'; "
+        "EXCEPTION WHEN OTHERS THEN IF SQLCODE != -2289 THEN RAISE; END IF; END;",
+
+        "BEGIN EXECUTE IMMEDIATE 'DROP TABLE CLIENTS_APP CASCADE CONSTRAINTS PURGE'; "
+        "EXCEPTION WHEN OTHERS THEN IF SQLCODE != -942 THEN RAISE; END IF; END;",
+
+        "BEGIN EXECUTE IMMEDIATE 'DROP TABLE CITERNES_APP CASCADE CONSTRAINTS PURGE'; "
+        "EXCEPTION WHEN OTHERS THEN IF SQLCODE != -942 THEN RAISE; END IF; END;",
+
+        "BEGIN EXECUTE IMMEDIATE 'CREATE TABLE CLIENT ("
+        "ID NUMBER PRIMARY KEY, "
+        "NAME VARCHAR2(120) NOT NULL, "
+        "EMAIL VARCHAR2(180), "
+        "PHONE VARCHAR2(40), "
+        "ADDRESS VARCHAR2(240), "
+        "CREATED_AT DATE DEFAULT SYSDATE NOT NULL, "
+        "STATUS VARCHAR2(30))'; "
         "EXCEPTION WHEN OTHERS THEN IF SQLCODE != -955 THEN RAISE; END IF; END;",
 
-        "BEGIN EXECUTE IMMEDIATE 'CREATE TABLE citernes_app ("
-        "id NUMBER PRIMARY KEY, "
-        "capacite_l NUMBER(12,2) NOT NULL, "
-        "volume_l NUMBER(12,2) DEFAULT 0 NOT NULL, "
-        "qualite VARCHAR2(60), "
-        "temperature_c NUMBER(5,2), "
-        "dernier_remplissage DATE, "
-        "CONSTRAINT ck_citernes_app_cap CHECK (capacite_l > 0), "
-        "CONSTRAINT ck_citernes_app_vol CHECK (volume_l >= 0 AND volume_l <= capacite_l))'; "
+        "BEGIN EXECUTE IMMEDIATE 'CREATE TABLE CITERNE ("
+        "ID NUMBER PRIMARY KEY, "
+        "CODE VARCHAR2(40) NOT NULL UNIQUE, "
+        "CAPACITY_L NUMBER(12,2) NOT NULL, "
+        "CURRENT_VOLUME_L NUMBER(12,2) DEFAULT 0 NOT NULL, "
+        "QUALITY_INDEX NUMBER(6,2), "
+        "TEMPERATURE_C NUMBER(5,2), "
+        "LAST_FILLING_AT DATE, "
+        "STATUS VARCHAR2(30), "
+        "CONSTRAINT CK_CITERNE_CAP_POSITIVE CHECK (CAPACITY_L > 0), "
+        "CONSTRAINT CK_CITERNE_VOL_VALID CHECK (CURRENT_VOLUME_L >= 0 AND CURRENT_VOLUME_L <= CAPACITY_L))'; "
         "EXCEPTION WHEN OTHERS THEN IF SQLCODE != -955 THEN RAISE; END IF; END;",
 
-        "BEGIN EXECUTE IMMEDIATE 'CREATE SEQUENCE seq_clients_app START WITH 1 INCREMENT BY 1 NOCACHE NOCYCLE'; "
+        "BEGIN EXECUTE IMMEDIATE 'CREATE SEQUENCE SEQ_CLIENT START WITH 1 INCREMENT BY 1 NOCACHE NOCYCLE'; "
         "EXCEPTION WHEN OTHERS THEN IF SQLCODE != -955 THEN RAISE; END IF; END;",
 
-        "BEGIN EXECUTE IMMEDIATE 'CREATE SEQUENCE seq_citernes_app START WITH 1 INCREMENT BY 1 NOCACHE NOCYCLE'; "
+        "BEGIN EXECUTE IMMEDIATE 'CREATE SEQUENCE SEQ_CITERNE START WITH 1 INCREMENT BY 1 NOCACHE NOCYCLE'; "
         "EXCEPTION WHEN OTHERS THEN IF SQLCODE != -955 THEN RAISE; END IF; END;",
 
-        "CREATE OR REPLACE TRIGGER trg_clients_app_bi "
-        "BEFORE INSERT ON clients_app "
+        "CREATE OR REPLACE TRIGGER TRG_CLIENT_BI "
+        "BEFORE INSERT ON CLIENT "
         "FOR EACH ROW "
         "WHEN (NEW.id IS NULL) "
         "BEGIN "
-        "SELECT seq_clients_app.NEXTVAL INTO :NEW.id FROM dual; "
+        "SELECT SEQ_CLIENT.NEXTVAL INTO :NEW.ID FROM dual; "
         "END;",
 
-        "CREATE OR REPLACE TRIGGER trg_citernes_app_bi "
-        "BEFORE INSERT ON citernes_app "
+        "CREATE OR REPLACE TRIGGER TRG_CITERNE_BI "
+        "BEFORE INSERT ON CITERNE "
         "FOR EACH ROW "
         "WHEN (NEW.id IS NULL) "
         "BEGIN "
-        "SELECT seq_citernes_app.NEXTVAL INTO :NEW.id FROM dual; "
+        "SELECT SEQ_CITERNE.NEXTVAL INTO :NEW.ID FROM dual; "
         "END;"
     };
 
@@ -610,28 +948,30 @@ void MainWindow::loadClientsFromOracle()
         return;
     }
 
-    QSqlQuery q(db);
-    if (!q.exec("SELECT id, nom, email, telephone, adresse, TO_CHAR(inscrit_le,'YYYY-MM-DD'), statut FROM clients_app ORDER BY id")) {
-        QMessageBox::critical(this, "Oracle", "Chargement clients échoué:\n" + q.lastError().text());
+    QString errorMessage;
+    const QList<Client> clients = Client::afficher(db, &errorMessage);
+    if (!errorMessage.isEmpty()) {
+        QMessageBox::critical(this, "Oracle", "Chargement clients échoué:\n" + errorMessage);
         return;
     }
 
     clientsTable->setRowCount(0);
     int row = 0;
-    while (q.next()) {
-        const int id = q.value(0).toInt();
+    for (const Client &client : clients) {
+        const int id = client.id();
         clientsTable->insertRow(row);
         clientsTable->setItem(row,0, new QTableWidgetItem(QString::number(id)));
-        clientsTable->setItem(row,1, new QTableWidgetItem(q.value(1).toString()));
-        clientsTable->setItem(row,2, new QTableWidgetItem(q.value(2).toString()));
-        clientsTable->setItem(row,3, new QTableWidgetItem(q.value(3).toString()));
-        clientsTable->setItem(row,4, new QTableWidgetItem(q.value(4).toString()));
-        clientsTable->setItem(row,5, new QTableWidgetItem(q.value(5).toString()));
-        clientsTable->setItem(row,6, new QTableWidgetItem(q.value(6).toString()));
+        clientsTable->setItem(row,1, new QTableWidgetItem(client.name()));
+        clientsTable->setItem(row,2, new QTableWidgetItem(client.email()));
+        clientsTable->setItem(row,3, new QTableWidgetItem(client.phone()));
+        clientsTable->setItem(row,4, new QTableWidgetItem(client.address()));
+        clientsTable->setItem(row,5, new QTableWidgetItem(client.createdAt().toString("yyyy-MM-dd")));
+        clientsTable->setItem(row,6, new QTableWidgetItem(client.status()));
         clientsTable->setCellWidget(row,7, createClientActionsWidget(id));
         ++row;
     }
     clientsTable->resizeColumnsToContents();
+    updateClientStatistics();
 }
 
 void MainWindow::loadCiternesFromOracle()
@@ -670,20 +1010,35 @@ void MainWindow::loadCiternesFromOracle()
 QWidget* MainWindow::createClientActionsWidget(int id)
 {
     QWidget *w = new QWidget();
+    w->setObjectName("tableActionsCell");
     QHBoxLayout *hl = new QHBoxLayout(w);
-    hl->setContentsMargins(2,2,2,2);
-    QPushButton *view = new QPushButton("👁");
-    view->setFixedSize(28,28);
+    hl->setContentsMargins(0,0,0,0);
+    hl->setSpacing(4);
+
+    QPushButton *view = new QPushButton("Voir");
+    view->setProperty("tableAction", "view");
+    view->setFixedSize(62,28);
+    view->setCursor(Qt::PointingHandCursor);
+    view->setToolTip("Afficher le client");
     view->setProperty("client_id", id);
     connect(view, &QPushButton::clicked, this, &MainWindow::viewSelectedClient);
-    QPushButton *edit = new QPushButton("✎");
-    edit->setFixedSize(28,28);
+
+    QPushButton *edit = new QPushButton("Edit");
+    edit->setProperty("tableAction", "edit");
+    edit->setFixedSize(62,28);
+    edit->setCursor(Qt::PointingHandCursor);
+    edit->setToolTip("Modifier le client");
     edit->setProperty("client_id", id);
     connect(edit, &QPushButton::clicked, this, &MainWindow::editSelectedClient);
-    QPushButton *del = new QPushButton("🗑");
-    del->setFixedSize(28,28);
+
+    QPushButton *del = new QPushButton("Suppr");
+    del->setProperty("tableAction", "danger");
+    del->setFixedSize(66,28);
+    del->setCursor(Qt::PointingHandCursor);
+    del->setToolTip("Supprimer le client");
     del->setProperty("client_id", id);
     connect(del, &QPushButton::clicked, this, &MainWindow::deleteSelectedClient);
+
     hl->addWidget(view);
     hl->addWidget(edit);
     hl->addWidget(del);
@@ -694,20 +1049,35 @@ QWidget* MainWindow::createClientActionsWidget(int id)
 QWidget* MainWindow::createCiterneActionsWidget(int id)
 {
     QWidget *aw = new QWidget();
+    aw->setObjectName("tableActionsCell");
     QHBoxLayout *al = new QHBoxLayout(aw);
-    al->setContentsMargins(2,2,2,2);
-    QPushButton *fill = new QPushButton("➕");
-    fill->setFixedSize(28,28);
+    al->setContentsMargins(0,0,0,0);
+    al->setSpacing(4);
+
+    QPushButton *fill = new QPushButton("Rempl");
+    fill->setProperty("tableAction", "fill");
+    fill->setFixedSize(68,28);
+    fill->setCursor(Qt::PointingHandCursor);
+    fill->setToolTip("Ajouter du volume");
     fill->setProperty("citerne_id", id);
     connect(fill, &QPushButton::clicked, this, &MainWindow::onFillButtonClicked);
-    QPushButton *drain = new QPushButton("➖");
-    drain->setFixedSize(28,28);
+
+    QPushButton *drain = new QPushButton("Vider");
+    drain->setProperty("tableAction", "drain");
+    drain->setFixedSize(62,28);
+    drain->setCursor(Qt::PointingHandCursor);
+    drain->setToolTip("Retirer du volume");
     drain->setProperty("citerne_id", id);
     connect(drain, &QPushButton::clicked, this, &MainWindow::onDrainButtonClicked);
-    QPushButton *edit = new QPushButton("✎");
-    edit->setFixedSize(28,28);
+
+    QPushButton *edit = new QPushButton("Edit");
+    edit->setProperty("tableAction", "edit");
+    edit->setFixedSize(62,28);
+    edit->setCursor(Qt::PointingHandCursor);
+    edit->setToolTip("Modifier la citerne");
     edit->setProperty("citerne_id", id);
     connect(edit, &QPushButton::clicked, this, &MainWindow::editSelectedCiterne);
+
     al->addWidget(fill);
     al->addWidget(drain);
     al->addWidget(edit);
@@ -753,6 +1123,121 @@ int MainWindow::findCiterneRowById(int id)
     return -1;
 }
 
+void MainWindow::updateClientStatistics()
+{
+    if (!clientsTable || !statsTotalClientsValue || !statsStatusBreakdownValue || !statsTopCityValue) {
+        return;
+    }
+
+    const int total = clientsTable->rowCount();
+    int active = 0;
+    int inactive = 0;
+    int undefinedStatus = 0;
+    int otherStatus = 0;
+    int newThisMonth = 0;
+    int completeProfiles = 0;
+    QMap<QString, int> statusCount;
+    QMap<QString, int> cityCount;
+
+    const QDate now = QDate::currentDate();
+    for (int r = 0; r < total; ++r) {
+        const QString email = clientsTable->item(r, 2) ? clientsTable->item(r, 2)->text().trimmed() : QString();
+        const QString phone = clientsTable->item(r, 3) ? clientsTable->item(r, 3)->text().trimmed() : QString();
+        const QString address = clientsTable->item(r, 4) ? clientsTable->item(r, 4)->text().trimmed() : QString();
+        const QString dateText = clientsTable->item(r, 5) ? clientsTable->item(r, 5)->text().trimmed() : QString();
+        const QString status = clientsTable->item(r, 6) ? clientsTable->item(r, 6)->text().trimmed() : QString();
+
+        const QString normalizedStatus = status.isEmpty() ? QString("Non défini") : status;
+        statusCount[normalizedStatus]++;
+        if (normalizedStatus.compare("Actif", Qt::CaseInsensitive) == 0) {
+            ++active;
+        } else if (normalizedStatus.compare("Inactif", Qt::CaseInsensitive) == 0) {
+            ++inactive;
+        } else if (normalizedStatus.compare("Non défini", Qt::CaseInsensitive) == 0) {
+            ++undefinedStatus;
+        } else {
+            ++otherStatus;
+        }
+
+        if (!email.isEmpty() && !phone.isEmpty() && !address.isEmpty()) {
+            ++completeProfiles;
+        }
+
+        const QDate inscriptionDate = QDate::fromString(dateText, "yyyy-MM-dd");
+        if (inscriptionDate.isValid() && inscriptionDate.year() == now.year() && inscriptionDate.month() == now.month()) {
+            ++newThisMonth;
+        }
+
+        if (!address.isEmpty()) {
+            QString city = address;
+            const int commaIndex = address.lastIndexOf(',');
+            if (commaIndex >= 0) {
+                city = address.mid(commaIndex + 1).trimmed();
+            }
+            if (!city.isEmpty()) {
+                cityCount[city]++;
+            }
+        }
+    }
+
+    QString topCity = "N/A";
+    int topCityCount = 0;
+    for (auto it = cityCount.constBegin(); it != cityCount.constEnd(); ++it) {
+        if (it.value() > topCityCount) {
+            topCity = it.key();
+            topCityCount = it.value();
+        }
+    }
+    if (topCityCount > 0) {
+        topCity += QString(" (%1)").arg(topCityCount);
+    }
+
+    QStringList statusLines;
+    for (auto it = statusCount.constBegin(); it != statusCount.constEnd(); ++it) {
+        statusLines << QString("- %1: %2").arg(it.key()).arg(it.value());
+    }
+    if (statusLines.isEmpty()) {
+        statusLines << "Aucune donnée";
+    }
+
+    statsTotalClientsValue->setText(QString::number(total));
+    statsActiveClientsValue->setText(QString::number(active));
+    statsInactiveClientsValue->setText(QString::number(inactive));
+    statsNewThisMonthValue->setText(QString::number(newThisMonth));
+    statsCompleteProfilesValue->setText(QString::number(completeProfiles));
+    statsStatusBreakdownValue->setText(statusLines.join("\n"));
+    statsTopCityValue->setText(topCity);
+
+    if (statsDonutChartLabel) {
+        const QList<int> donutValues = {undefinedStatus, inactive, active, otherStatus};
+        const QList<QColor> donutColors = {
+            QColor("#1F9FE0"),
+            QColor("#FF3A3A"),
+            QColor("#38C86A"),
+            QColor("#FF7A00")
+        };
+        const QSize chartSize = statsDonutChartLabel->size().isValid() ? statsDonutChartLabel->size() : QSize(280, 240);
+        statsDonutChartLabel->setPixmap(buildDonutChartPixmap(chartSize,
+                                                              donutValues,
+                                                              donutColors,
+                                                              QString::number(total),
+                                                              QString("clients")));
+    }
+
+    if (statsLegendActiveValue) {
+        statsLegendActiveValue->setText(formatLegendLine("Actif", active, total));
+    }
+    if (statsLegendInactiveValue) {
+        statsLegendInactiveValue->setText(formatLegendLine("Inactif", inactive, total));
+    }
+    if (statsLegendUndefinedValue) {
+        statsLegendUndefinedValue->setText(formatLegendLine("Non défini", undefinedStatus, total));
+    }
+    if (statsLegendOtherValue) {
+        statsLegendOtherValue->setText(formatLegendLine("Autre", otherStatus, total));
+    }
+}
+
 // ============================================================================
 // SLOTS - Clients CRUD etc.
 // ============================================================================
@@ -768,6 +1253,11 @@ void MainWindow::showAddClientDialog()
     QLineEdit *email = new QLineEdit();
     QLineEdit *phone = new QLineEdit();
     QLineEdit *address = new QLineEdit();
+    name->setMaxLength(80);
+    email->setMaxLength(120);
+    phone->setMaxLength(20);
+    address->setMaxLength(180);
+    phone->setValidator(new QRegularExpressionValidator(QRegularExpression("^\\+?[0-9 ]{0,20}$"), phone));
     QDateEdit *regDate = new QDateEdit(QDate::currentDate());
     regDate->setCalendarPopup(true);
     form->addRow("Nom:", name);
@@ -779,22 +1269,48 @@ void MainWindow::showAddClientDialog()
     QVBoxLayout *v = new QVBoxLayout(&dlg);
     v->addLayout(form);
     QDialogButtonBox *bb = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel);
-    connect(bb, &QDialogButtonBox::accepted, &dlg, &QDialog::accept);
+    connect(bb, &QDialogButtonBox::accepted, &dlg, [&]() {
+        const QString n = name->text().trimmed();
+        const QString e = email->text().trimmed();
+        const QString p = phone->text().trimmed();
+        const QString a = address->text().trimmed();
+        static const QRegularExpression emailRx("^[A-Z0-9._%+-]+@[A-Z0-9.-]+\\.[A-Z]{2,}$", QRegularExpression::CaseInsensitiveOption);
+        static const QRegularExpression phoneRx("^\\+?[0-9 ]{8,20}$");
+
+        if (n.size() < 2) {
+            QMessageBox::warning(&dlg, "Saisie invalide", "Le nom doit contenir au moins 2 caractères.");
+            return;
+        }
+        if (!emailRx.match(e).hasMatch()) {
+            QMessageBox::warning(&dlg, "Saisie invalide", "Email invalide.");
+            return;
+        }
+        if (!phoneRx.match(p).hasMatch()) {
+            QMessageBox::warning(&dlg, "Saisie invalide", "Téléphone invalide (8 à 20 chiffres, espaces autorisés).");
+            return;
+        }
+        if (a.size() < 5) {
+            QMessageBox::warning(&dlg, "Saisie invalide", "L'adresse doit contenir au moins 5 caractères.");
+            return;
+        }
+        dlg.accept();
+    });
     connect(bb, &QDialogButtonBox::rejected, &dlg, &QDialog::reject);
     v->addWidget(bb);
 
     if (dlg.exec() == QDialog::Accepted) {
         if (oracleActive && db.isOpen()) {
-            QSqlQuery q(db);
-            q.prepare("INSERT INTO clients_app (nom,email,telephone,adresse,inscrit_le,statut) "
-                      "VALUES (:nom,:email,:telephone,:adresse,TO_DATE(:inscrit,'YYYY-MM-DD'),'Actif')");
-            q.bindValue(":nom", name->text());
-            q.bindValue(":email", email->text());
-            q.bindValue(":telephone", phone->text());
-            q.bindValue(":adresse", address->text());
-            q.bindValue(":inscrit", regDate->date().toString("yyyy-MM-dd"));
-            if (!q.exec()) {
-                QMessageBox::critical(this, "Oracle", "Ajout client échoué:\n" + q.lastError().text());
+            Client client;
+            client.setName(name->text());
+            client.setEmail(email->text());
+            client.setPhone(phone->text());
+            client.setAddress(address->text());
+            client.setCreatedAt(regDate->date());
+            client.setStatus("Actif");
+
+            QString errorMessage;
+            if (!client.ajouter(db, &errorMessage)) {
+                QMessageBox::critical(this, "Oracle", "Ajout client échoué:\n" + errorMessage);
                 return;
             }
             loadClientsFromOracle();
@@ -834,6 +1350,7 @@ void MainWindow::editSelectedClient()
     QString phone = clientsTable->item(targetRow,3)->text();
     QString address = clientsTable->item(targetRow,4)->text();
     QDate reg = QDate::fromString(clientsTable->item(targetRow,5)->text(),"yyyy-MM-dd");
+    int clientId = clientsTable->item(targetRow,0)->text().toInt();
 
     QDialog dlg(this);
     dlg.setWindowTitle(QString("Éditer client %1").arg(name));
@@ -842,25 +1359,57 @@ void MainWindow::editSelectedClient()
     QLineEdit *emailE = new QLineEdit(email);
     QLineEdit *phoneE = new QLineEdit(phone);
     QLineEdit *addressE = new QLineEdit(address);
+    nameE->setMaxLength(80);
+    emailE->setMaxLength(120);
+    phoneE->setMaxLength(20);
+    addressE->setMaxLength(180);
+    phoneE->setValidator(new QRegularExpressionValidator(QRegularExpression("^\\+?[0-9 ]{0,20}$"), phoneE));
     QDateEdit *regE = new QDateEdit(reg); regE->setCalendarPopup(true);
     form->addRow("Nom:", nameE); form->addRow("Email:", emailE); form->addRow("Téléphone:", phoneE); form->addRow("Adresse:", addressE); form->addRow("Inscrit le:", regE);
     QVBoxLayout *v = new QVBoxLayout(&dlg); v->addLayout(form);
     QDialogButtonBox *bb = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel);
-    connect(bb,&QDialogButtonBox::accepted,&dlg,&QDialog::accept); connect(bb,&QDialogButtonBox::rejected,&dlg,&QDialog::reject);
+    connect(bb,&QDialogButtonBox::accepted,&dlg,[&]() {
+        const QString n = nameE->text().trimmed();
+        const QString e = emailE->text().trimmed();
+        const QString p = phoneE->text().trimmed();
+        const QString a = addressE->text().trimmed();
+        static const QRegularExpression emailRx("^[A-Z0-9._%+-]+@[A-Z0-9.-]+\\.[A-Z]{2,}$", QRegularExpression::CaseInsensitiveOption);
+        static const QRegularExpression phoneRx("^\\+?[0-9 ]{8,20}$");
+
+        if (n.size() < 2) {
+            QMessageBox::warning(&dlg, "Saisie invalide", "Le nom doit contenir au moins 2 caractères.");
+            return;
+        }
+        if (!emailRx.match(e).hasMatch()) {
+            QMessageBox::warning(&dlg, "Saisie invalide", "Email invalide.");
+            return;
+        }
+        if (!phoneRx.match(p).hasMatch()) {
+            QMessageBox::warning(&dlg, "Saisie invalide", "Téléphone invalide (8 à 20 chiffres, espaces autorisés).");
+            return;
+        }
+        if (a.size() < 5) {
+            QMessageBox::warning(&dlg, "Saisie invalide", "L'adresse doit contenir au moins 5 caractères.");
+            return;
+        }
+        dlg.accept();
+    });
+    connect(bb,&QDialogButtonBox::rejected,&dlg,&QDialog::reject);
     v->addWidget(bb);
     if (dlg.exec() == QDialog::Accepted) {
         if (oracleActive && db.isOpen()) {
-            QSqlQuery q(db);
-            q.prepare("UPDATE clients_app SET nom=:nom,email=:email,telephone=:telephone,adresse=:adresse,"
-                      "inscrit_le=TO_DATE(:inscrit,'YYYY-MM-DD') WHERE id=:id");
-            q.bindValue(":nom", nameE->text());
-            q.bindValue(":email", emailE->text());
-            q.bindValue(":telephone", phoneE->text());
-            q.bindValue(":adresse", addressE->text());
-            q.bindValue(":inscrit", regE->date().toString("yyyy-MM-dd"));
-            q.bindValue(":id", id);
-            if (!q.exec()) {
-                QMessageBox::critical(this, "Oracle", "Modification client échouée:\n" + q.lastError().text());
+            Client client;
+            client.setId(clientId);
+            client.setName(nameE->text());
+            client.setEmail(emailE->text());
+            client.setPhone(phoneE->text());
+            client.setAddress(addressE->text());
+            client.setCreatedAt(regE->date());
+            client.setStatus(clientsTable->item(targetRow,6) ? clientsTable->item(targetRow,6)->text() : "Actif");
+
+            QString errorMessage;
+            if (!client.modifier(db, &errorMessage)) {
+                QMessageBox::critical(this, "Oracle", "Modification client échouée:\n" + errorMessage);
                 return;
             }
             loadClientsFromOracle();
@@ -908,11 +1457,9 @@ void MainWindow::deleteSelectedClient()
     QMessageBox::StandardButton rep = QMessageBox::question(this,"Confirmer suppression", QString("Supprimer le client ID %1 ?").arg(id), QMessageBox::Yes|QMessageBox::No);
     if (rep == QMessageBox::Yes) {
         if (oracleActive && db.isOpen()) {
-            QSqlQuery q(db);
-            q.prepare("DELETE FROM clients_app WHERE id=:id");
-            q.bindValue(":id", id);
-            if (!q.exec()) {
-                QMessageBox::critical(this, "Oracle", "Suppression client échouée:\n" + q.lastError().text());
+            QString errorMessage;
+            if (!Client::supprimer(db, id, &errorMessage)) {
+                QMessageBox::critical(this, "Oracle", "Suppression client échouée:\n" + errorMessage);
                 return;
             }
             loadClientsFromOracle();
@@ -959,10 +1506,49 @@ void MainWindow::showAddCiterneDialog()
     QFormLayout *form = new QFormLayout();
     QLineEdit *cap = new QLineEdit(); QLineEdit *vol = new QLineEdit();
     QLineEdit *qual = new QLineEdit(); QLineEdit *temp = new QLineEdit();
+    auto *numVal = new QDoubleValidator(0.0, 1000000000.0, 2, &dlg);
+    numVal->setNotation(QDoubleValidator::StandardNotation);
+    auto *tempVal = new QDoubleValidator(-50.0, 200.0, 2, &dlg);
+    tempVal->setNotation(QDoubleValidator::StandardNotation);
+    cap->setValidator(numVal);
+    vol->setValidator(numVal);
+    temp->setValidator(tempVal);
+    qual->setMaxLength(40);
     QDateEdit *last = new QDateEdit(QDate::currentDate()); last->setCalendarPopup(true);
     form->addRow("Capacité (L):", cap); form->addRow("Volume (L):", vol); form->addRow("Qualité:", qual); form->addRow("Temp (°C):", temp); form->addRow("Dernier remplissage:", last);
     QVBoxLayout *v = new QVBoxLayout(&dlg); v->addLayout(form);
-    QDialogButtonBox *bb = new QDialogButtonBox(QDialogButtonBox::Ok|QDialogButtonBox::Cancel); connect(bb,&QDialogButtonBox::accepted,&dlg,&QDialog::accept); connect(bb,&QDialogButtonBox::rejected,&dlg,&QDialog::reject); v->addWidget(bb);
+    QDialogButtonBox *bb = new QDialogButtonBox(QDialogButtonBox::Ok|QDialogButtonBox::Cancel);
+    connect(bb,&QDialogButtonBox::accepted,&dlg,[&]() {
+        bool okCap = false;
+        bool okVol = false;
+        bool okTemp = false;
+        const double capV = cap->text().trimmed().toDouble(&okCap);
+        const double volV = vol->text().trimmed().toDouble(&okVol);
+        temp->text().trimmed().toDouble(&okTemp);
+        if (!okCap || capV <= 0.0) {
+            QMessageBox::warning(&dlg, "Saisie invalide", "La capacité doit être un nombre > 0.");
+            return;
+        }
+        if (!okVol || volV < 0.0) {
+            QMessageBox::warning(&dlg, "Saisie invalide", "Le volume doit être un nombre >= 0.");
+            return;
+        }
+        if (volV > capV) {
+            QMessageBox::warning(&dlg, "Saisie invalide", "Le volume ne peut pas dépasser la capacité.");
+            return;
+        }
+        if (!okTemp) {
+            QMessageBox::warning(&dlg, "Saisie invalide", "Température invalide.");
+            return;
+        }
+        if (qual->text().trimmed().isEmpty()) {
+            QMessageBox::warning(&dlg, "Saisie invalide", "La qualité est obligatoire.");
+            return;
+        }
+        dlg.accept();
+    });
+    connect(bb,&QDialogButtonBox::rejected,&dlg,&QDialog::reject);
+    v->addWidget(bb);
 
     if (dlg.exec() == QDialog::Accepted) {
         if (oracleActive && db.isOpen()) {
@@ -1022,6 +1608,14 @@ void MainWindow::editSelectedCiterne()
     QLineEdit *vol = new QLineEdit(vol0);
     QLineEdit *qual = new QLineEdit(qual0);
     QLineEdit *temp = new QLineEdit(temp0);
+    auto *numVal = new QDoubleValidator(0.0, 1000000000.0, 2, &dlg);
+    numVal->setNotation(QDoubleValidator::StandardNotation);
+    auto *tempVal = new QDoubleValidator(-50.0, 200.0, 2, &dlg);
+    tempVal->setNotation(QDoubleValidator::StandardNotation);
+    cap->setValidator(numVal);
+    vol->setValidator(numVal);
+    temp->setValidator(tempVal);
+    qual->setMaxLength(40);
     QDateEdit *last = new QDateEdit(date0.isValid() ? date0 : QDate::currentDate());
     last->setCalendarPopup(true);
     form->addRow("Capacité (L):", cap);
@@ -1033,7 +1627,35 @@ void MainWindow::editSelectedCiterne()
     QVBoxLayout *v = new QVBoxLayout(&dlg);
     v->addLayout(form);
     QDialogButtonBox *bb = new QDialogButtonBox(QDialogButtonBox::Ok|QDialogButtonBox::Cancel);
-    connect(bb,&QDialogButtonBox::accepted,&dlg,&QDialog::accept);
+    connect(bb,&QDialogButtonBox::accepted,&dlg,[&]() {
+        bool okCap = false;
+        bool okVol = false;
+        bool okTemp = false;
+        const double capV = cap->text().trimmed().toDouble(&okCap);
+        const double volV = vol->text().trimmed().toDouble(&okVol);
+        temp->text().trimmed().toDouble(&okTemp);
+        if (!okCap || capV <= 0.0) {
+            QMessageBox::warning(&dlg, "Saisie invalide", "La capacité doit être un nombre > 0.");
+            return;
+        }
+        if (!okVol || volV < 0.0) {
+            QMessageBox::warning(&dlg, "Saisie invalide", "Le volume doit être un nombre >= 0.");
+            return;
+        }
+        if (volV > capV) {
+            QMessageBox::warning(&dlg, "Saisie invalide", "Le volume ne peut pas dépasser la capacité.");
+            return;
+        }
+        if (!okTemp) {
+            QMessageBox::warning(&dlg, "Saisie invalide", "Température invalide.");
+            return;
+        }
+        if (qual->text().trimmed().isEmpty()) {
+            QMessageBox::warning(&dlg, "Saisie invalide", "La qualité est obligatoire.");
+            return;
+        }
+        dlg.accept();
+    });
     connect(bb,&QDialogButtonBox::rejected,&dlg,&QDialog::reject);
     v->addWidget(bb);
 
@@ -1100,6 +1722,10 @@ void MainWindow::onFillButtonClicked()
     bool ok=false;
     double add = QInputDialog::getDouble(this,"Remplir","Volume à ajouter (L):",100.0,0.0,1e9,2,&ok);
     if(!ok) return;
+    if (add <= 0.0) {
+        QMessageBox::warning(this, "Saisie invalide", "Le volume à ajouter doit être supérieur à 0.");
+        return;
+    }
     double cap = citernesTable->item(row,1)->text().toDouble();
     double vol = citernesTable->item(row,2)->text().toDouble();
     vol += add; if (vol>cap) vol=cap;
@@ -1127,6 +1753,10 @@ void MainWindow::onDrainButtonClicked()
     bool ok=false;
     double rem = QInputDialog::getDouble(this,"Vider","Volume à retirer (L):",100.0,0.0,1e9,2,&ok);
     if(!ok) return;
+    if (rem <= 0.0) {
+        QMessageBox::warning(this, "Saisie invalide", "Le volume à retirer doit être supérieur à 0.");
+        return;
+    }
     double cap = citernesTable->item(row,1)->text().toDouble();
     double vol = citernesTable->item(row,2)->text().toDouble();
     vol -= rem; if(vol<0) vol=0;
@@ -1172,8 +1802,14 @@ void MainWindow::exportCiternes()
 // ============================================================================
 void MainWindow::showStatisticsView()
 {
-    // Show the last added page (statistics placeholder)
-    // created by createStatisticsPage()
+    updateClientStatistics();
+    if (statisticsPage) {
+        stackedWidget->setCurrentWidget(statisticsPage);
+        if (moduleTabs) {
+            moduleTabs->setCurrentIndex(0);
+        }
+        return;
+    }
     stackedWidget->setCurrentIndex(stackedWidget->count()-1);
 }
 
@@ -1340,13 +1976,102 @@ void MainWindow::performBlending()
 // NOTIFICATIONS & ALERTS
 // ============================================================================
 
+QStringList MainWindow::buildCiterneAlerts(double thresholdPercent, int *criticalCount, int *warningCount, int *normalCount) const
+{
+    int critical = 0;
+    int warning = 0;
+    int normal = 0;
+    QStringList alerts;
+
+    auto qualityToScore = [](const QString &value) {
+        bool ok = false;
+        const double numeric = value.toDouble(&ok);
+        if (ok) {
+            return numeric * 100.0;
+        }
+
+        const QString v = value.trimmed().toUpper();
+        if (v == "EXTRA") return 95.0;
+        if (v == "PREMIUM") return 90.0;
+        if (v == "A") return 85.0;
+        if (v == "B") return 75.0;
+        if (v == "C") return 65.0;
+        if (v == "FAIBLE") return 50.0;
+        return 70.0;
+    };
+
+    for (int r = 0; r < citernesTable->rowCount(); ++r) {
+        const int id = citernesTable->item(r, 0) ? citernesTable->item(r, 0)->text().toInt() : (r + 1);
+        const double capacity = citernesTable->item(r, 1) ? citernesTable->item(r, 1)->text().toDouble() : 0.0;
+        const double volume = citernesTable->item(r, 2) ? citernesTable->item(r, 2)->text().toDouble() : 0.0;
+        const QString qualityText = citernesTable->item(r, 4) ? citernesTable->item(r, 4)->text() : QString();
+        const double temp = citernesTable->item(r, 5) ? citernesTable->item(r, 5)->text().toDouble() : 20.0;
+
+        if (capacity <= 0.0) {
+            ++critical;
+            alerts << QString("🔴 Citerne #%1: capacité invalide").arg(id);
+            continue;
+        }
+
+        const double fillPercent = (volume / capacity) * 100.0;
+        const double qualityScore = qualityToScore(qualityText);
+
+        QStringList reasons;
+        QString severity = "normal";
+
+        if (fillPercent < qMax(5.0, thresholdPercent * 0.6)) {
+            severity = "critical";
+            reasons << QString("niveau critique (%1%)").arg(fillPercent, 0, 'f', 1);
+        } else if (fillPercent < thresholdPercent) {
+            if (severity != "critical") severity = "warning";
+            reasons << QString("niveau bas (%1%)").arg(fillPercent, 0, 'f', 1);
+        }
+
+        if (temp < 5.0 || temp > 32.0) {
+            severity = "critical";
+            reasons << QString("température critique (%1°C)").arg(temp, 0, 'f', 1);
+        } else if (temp < 8.0 || temp > 28.0) {
+            if (severity != "critical") severity = "warning";
+            reasons << QString("température instable (%1°C)").arg(temp, 0, 'f', 1);
+        }
+
+        if (qualityScore < 60.0) {
+            severity = "critical";
+            reasons << QString("qualité faible (%1/100)").arg(qualityScore, 0, 'f', 1);
+        } else if (qualityScore < 70.0) {
+            if (severity != "critical") severity = "warning";
+            reasons << QString("qualité à surveiller (%1/100)").arg(qualityScore, 0, 'f', 1);
+        }
+
+        if (severity == "critical") {
+            ++critical;
+            alerts << QString("🔴 Citerne #%1: %2").arg(id).arg(reasons.join(", "));
+        } else if (severity == "warning") {
+            ++warning;
+            alerts << QString("🟡 Citerne #%1: %2").arg(id).arg(reasons.join(", "));
+        } else {
+            ++normal;
+            alerts << QString("🟢 Citerne #%1: statut normal (%2%)").arg(id).arg(fillPercent, 0, 'f', 1);
+        }
+    }
+
+    if (criticalCount) *criticalCount = critical;
+    if (warningCount) *warningCount = warning;
+    if (normalCount) *normalCount = normal;
+    return alerts;
+}
+
 void MainWindow::showNotifications()
 {
     QDialog dlg(this);
     dlg.setWindowTitle("Alertes et Notifications");
-    dlg.setMinimumSize(500, 400);
+    dlg.setMinimumSize(620, 470);
     
     QVBoxLayout *vl = new QVBoxLayout(&dlg);
+
+    QLabel *subtitle = new QLabel("Suivi dynamique des citernes: niveau, température et qualité.");
+    subtitle->setStyleSheet("color:#355C57; font-size:12px;");
+    vl->addWidget(subtitle);
     
     // Threshold config
     QHBoxLayout *thresholdLayout = new QHBoxLayout();
@@ -1354,37 +2079,80 @@ void MainWindow::showNotifications()
     QDoubleSpinBox *thresholdSpin = new QDoubleSpinBox();
     thresholdSpin->setValue(lowLevelThreshold);
     thresholdSpin->setRange(0, 100);
+    thresholdSpin->setSingleStep(1.0);
     thresholdLayout->addWidget(thresholdSpin);
+
+    QPushButton *refreshBtn = new QPushButton("Analyser");
+    refreshBtn->setProperty("role", "accent");
+    thresholdLayout->addWidget(refreshBtn);
+
+    QPushButton *defaultBtn = new QPushButton("Seuil défaut (30%)");
+    defaultBtn->setProperty("role", "secondary");
+    thresholdLayout->addWidget(defaultBtn);
     thresholdLayout->addStretch();
     vl->addLayout(thresholdLayout);
+
+    QLabel *summaryLbl = new QLabel();
+    summaryLbl->setStyleSheet("font-weight:700; color:#163E38;");
+    vl->addWidget(summaryLbl);
     
     // Alerts list
     QLabel *alertsLbl = new QLabel("<b>Alertes actuelles:</b>");
     vl->addWidget(alertsLbl);
     
     QListWidget *alertsList = new QListWidget();
-    alertsList->addItem("⚠️ Citerne #3: Niveau bas (24%)");
-    alertsList->addItem("🔴 Citerne #4: Température critique (22.5°C)");
-    alertsList->addItem("🟡 Citerne #1: Variation volume (5.2% en 2h)");
-    alertsList->addItem("✓ Citerne #2: Statut normal");
+    alertsList->setSelectionMode(QAbstractItemView::NoSelection);
+    alertsList->setAlternatingRowColors(true);
+    alertsList->setMinimumHeight(170);
     vl->addWidget(alertsList);
     
     // History
-    QLabel *historyLbl = new QLabel("<b>Historique remplissages:</b>");
+    QLabel *historyLbl = new QLabel("<b>Historique notifications:</b>");
     vl->addWidget(historyLbl);
     
     QListWidget *historyList = new QListWidget();
-    historyList->addItem("2026-02-11 10:30 - Citerne #2: +200L");
-    historyList->addItem("2026-02-11 09:15 - Citerne #1: -150L");
-    historyList->addItem("2026-02-11 08:00 - Citerne #3: +350L");
+    historyList->setSelectionMode(QAbstractItemView::NoSelection);
+    const int maxItems = 20;
+    const int start = qMax(0, notificationHistory.size() - maxItems);
+    for (int i = start; i < notificationHistory.size(); ++i) {
+        historyList->addItem(notificationHistory[i]);
+    }
     vl->addWidget(historyList);
     
-    QDialogButtonBox *box = new QDialogButtonBox(QDialogButtonBox::Ok);
+    auto refreshAlerts = [&]() {
+        int critical = 0;
+        int warning = 0;
+        int normal = 0;
+        const QStringList alerts = buildCiterneAlerts(thresholdSpin->value(), &critical, &warning, &normal);
+
+        alertsList->clear();
+        alertsList->addItems(alerts);
+        summaryLbl->setText(QString("Critiques: %1   |   A surveiller: %2   |   Normales: %3")
+                            .arg(critical)
+                            .arg(warning)
+                            .arg(normal));
+    };
+
+    connect(refreshBtn, &QPushButton::clicked, &dlg, refreshAlerts);
+    connect(defaultBtn, &QPushButton::clicked, &dlg, [&]() {
+        thresholdSpin->setValue(30.0);
+        refreshAlerts();
+    });
+
+    QDialogButtonBox *box = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel);
     connect(box, &QDialogButtonBox::accepted, &dlg, &QDialog::accept);
+    connect(box, &QDialogButtonBox::rejected, &dlg, &QDialog::reject);
     vl->addWidget(box);
+
+    refreshAlerts();
     
-    dlg.exec();
-    lowLevelThreshold = thresholdSpin->value();
+    if (dlg.exec() == QDialog::Accepted) {
+        lowLevelThreshold = thresholdSpin->value();
+        checkLowLevelAlerts();
+        checkPredictiveAlerts();
+        const QString stamp = QDateTime::currentDateTime().toString("yyyy-MM-dd HH:mm");
+        notificationHistory.append(QString("[%1] Seuil alertes mis à %2%").arg(stamp).arg(lowLevelThreshold, 0, 'f', 0));
+    }
 }
 
 // ============================================================================
@@ -1401,33 +2169,111 @@ void MainWindow::showEquipmentStatus()
     
     QLabel *titleLbl = new QLabel("<b>Moniteurs de Santé - Prédiction Maintenance</b>");
     vl->addWidget(titleLbl);
-    
-    // Equipment monitoring
-    for (int i = 1; i <= 4; ++i) {
-        QGroupBox *gb = new QGroupBox(QString("Citerne #%1").arg(i));
+
+    QStringList globalAlerts;
+
+    // Equipment monitoring built from current citerne data
+    for (int r = 0; r < citernesTable->rowCount(); ++r) {
+        const int id = citernesTable->item(r, 0) ? citernesTable->item(r, 0)->text().toInt() : (r + 1);
+        const double capacity = citernesTable->item(r, 1) ? citernesTable->item(r, 1)->text().toDouble() : 0.0;
+        const double volume = citernesTable->item(r, 2) ? citernesTable->item(r, 2)->text().toDouble() : 0.0;
+        const QString quality = citernesTable->item(r, 4) ? citernesTable->item(r, 4)->text().trimmed() : QString();
+        const double temperature = citernesTable->item(r, 5) ? citernesTable->item(r, 5)->text().toDouble() : 20.0;
+
+        const double fillPercent = (capacity > 0.0) ? ((volume / capacity) * 100.0) : 0.0;
+
+        int riskScore = 5;
+        QStringList anomalies;
+
+        if (fillPercent < 20.0) {
+            riskScore += 35;
+            anomalies << QString("niveau critique (%1%)").arg(fillPercent, 0, 'f', 1);
+        } else if (fillPercent < 35.0) {
+            riskScore += 20;
+            anomalies << QString("niveau faible (%1%)").arg(fillPercent, 0, 'f', 1);
+        }
+
+        if (temperature < 8.0 || temperature > 26.0) {
+            riskScore += 15;
+            anomalies << QString("température hors plage (%1°C)").arg(temperature, 0, 'f', 1);
+        }
+        if (temperature < 5.0 || temperature > 30.0) {
+            riskScore += 15;
+        }
+
+        bool qualityNumericOk = false;
+        double qualityScore = quality.toDouble(&qualityNumericOk) * 100.0;
+        if (!qualityNumericOk) {
+            const QString q = quality.toUpper();
+            if (q == "EXTRA") qualityScore = 95.0;
+            else if (q == "PREMIUM") qualityScore = 90.0;
+            else if (q == "A") qualityScore = 85.0;
+            else if (q == "B") qualityScore = 75.0;
+            else if (q == "C") qualityScore = 65.0;
+            else qualityScore = 70.0;
+        }
+
+        if (qualityScore < 65.0) {
+            riskScore += 20;
+            anomalies << QString("qualité dégradée (%1/100)").arg(qualityScore, 0, 'f', 1);
+        } else if (qualityScore < 75.0) {
+            riskScore += 10;
+        }
+
+        riskScore = qBound(0, riskScore, 100);
+        const int healthScore = 100 - riskScore;
+        const int rulDays = qMax(7, 120 - riskScore);
+
+        QString riskLevel = "Faible";
+        if (riskScore >= 70) riskLevel = "Élevé";
+        else if (riskScore >= 40) riskLevel = "Moyen";
+
+        QString recommendation = "Surveillance standard.";
+        if (riskScore >= 70) {
+            recommendation = "Maintenance immédiate recommandée.";
+        } else if (riskScore >= 40) {
+            recommendation = "Inspection préventive sous 7 jours.";
+        }
+
+        QGroupBox *gb = new QGroupBox(QString("Citerne #%1").arg(id));
         QVBoxLayout *gvl = new QVBoxLayout(gb);
-        
-        // Simulate health metrics
-        int healthScore = 75 + (i * 5);
-        
+
         QLabel *statusLbl = new QLabel(QString(
             "État général: %1%\n"
-            "Température: 22.3°C (Normal)\n"
-            "Pression: 1.2 bar (Normal)\n"
-            "Niveau huile moteur: 85%\n"
-            "RUL (Remaining Useful Life): ~%2 jours"
-        ).arg(healthScore).arg(400 - (i * 30)));
-        
+            "Niveau remplissage: %2%\n"
+            "Température: %3°C\n"
+            "Indice qualité: %4/100\n"
+            "Niveau de risque: %5\n"
+            "RUL (Remaining Useful Life): ~%6 jours\n"
+            "Action recommandée: %7"
+        ).arg(healthScore)
+         .arg(fillPercent, 0, 'f', 1)
+         .arg(temperature, 0, 'f', 1)
+         .arg(qualityScore, 0, 'f', 1)
+         .arg(riskLevel)
+         .arg(rulDays)
+         .arg(recommendation));
+
         gvl->addWidget(statusLbl);
+
+        if (!anomalies.isEmpty()) {
+            QLabel *anomaliesLbl = new QLabel("Anomalies: " + anomalies.join("; "));
+            anomaliesLbl->setWordWrap(true);
+            anomaliesLbl->setStyleSheet("color: #8A4B08; font-weight: 600;");
+            gvl->addWidget(anomaliesLbl);
+            globalAlerts << QString("Citerne #%1: %2").arg(id).arg(anomalies.join(", "));
+        }
+
         vl->addWidget(gb);
     }
-    
-    QLabel *predictionLbl = new QLabel(
-        "\n🔍 <b>Prédictions Anomalies:</b>\n"
-        "• Citerne #3: Possible fuite détectée (variation volume 3% en 24h)\n"
-        "• Citerne #4: Capteur température instable (à calibrer)\n"
-        "• Maintenance préventive recommandée dans 15 jours"
-    );
+
+    QLabel *predictionLbl = new QLabel();
+    predictionLbl->setWordWrap(true);
+    if (globalAlerts.isEmpty()) {
+        predictionLbl->setText("\n✓ <b>Aucune anomalie critique détectée.</b>\nMaintenance préventive standard.");
+    } else {
+        predictionLbl->setText("\n🔍 <b>Prédictions Anomalies:</b>\n• " + globalAlerts.join("\n• "));
+    }
     vl->addWidget(predictionLbl);
     
     vl->addStretch();
@@ -1441,28 +2287,87 @@ void MainWindow::showEquipmentStatus()
 
 void MainWindow::checkPredictiveAlerts()
 {
-    // Implementation for checking predictive alerts
-    QMessageBox::information(this, "Vérification", "Vérification des alertes prédictives en cours...");
+    QStringList alerts;
+    for (int r = 0; r < citernesTable->rowCount(); ++r) {
+        const int id = citernesTable->item(r, 0) ? citernesTable->item(r, 0)->text().toInt() : (r + 1);
+        const double capacity = citernesTable->item(r, 1) ? citernesTable->item(r, 1)->text().toDouble() : 0.0;
+        const double volume = citernesTable->item(r, 2) ? citernesTable->item(r, 2)->text().toDouble() : 0.0;
+        const double temp = citernesTable->item(r, 5) ? citernesTable->item(r, 5)->text().toDouble() : 20.0;
+
+        const double fillPercent = (capacity > 0.0) ? ((volume / capacity) * 100.0) : 0.0;
+        int risk = 0;
+        if (fillPercent < 20.0) risk += 40;
+        else if (fillPercent < 35.0) risk += 20;
+        if (temp < 5.0 || temp > 30.0) risk += 35;
+        else if (temp < 8.0 || temp > 26.0) risk += 20;
+
+        if (risk >= 40) {
+            const QString level = (risk >= 70) ? "ÉLEVÉ" : "MOYEN";
+            alerts << QString("Citerne #%1: risque %2 (%3)").arg(id).arg(level).arg(risk);
+        }
+    }
+
+    if (alerts.isEmpty()) {
+        QMessageBox::information(this, "Maintenance prédictive", "Aucune alerte prédictive détectée.");
+        return;
+    }
+
+    notificationHistory.append(alerts);
+    QMessageBox::warning(this, "Maintenance prédictive", "Alertes détectées:\n- " + alerts.join("\n- "));
 }
 
 void MainWindow::checkLowLevelAlerts()
 {
-    // Implementation for checking low level alerts
     for (int i = 0; i < citernesTable->rowCount(); ++i) {
-        QString volume = citernesTable->item(i, 2)->text();
-        QString capacity = citernesTable->item(i, 1)->text();
-        double fillPercent = (volume.toDouble() / capacity.toDouble()) * 100.0;
-        
+        const QString volume = citernesTable->item(i, 2) ? citernesTable->item(i, 2)->text() : QString();
+        const QString capacity = citernesTable->item(i, 1) ? citernesTable->item(i, 1)->text() : QString();
+        const int id = citernesTable->item(i, 0) ? citernesTable->item(i, 0)->text().toInt() : (i + 1);
+        const double capacityValue = capacity.toDouble();
+        if (capacityValue <= 0.0) {
+            continue;
+        }
+
+        const double fillPercent = (volume.toDouble() / capacityValue) * 100.0;
         if (fillPercent < lowLevelThreshold) {
-            notificationHistory.append(QString("Alerte: Citerne %1 niveau bas (%2%)").arg(i+1).arg((int)fillPercent));
+            notificationHistory.append(QString("Alerte: Citerne %1 niveau bas (%2%)").arg(id).arg((int)fillPercent));
         }
     }
 }
 
 void MainWindow::detectAnomalies()
 {
-    // Implementation for detecting anomalies
-    QMessageBox::information(this, "Détection Anomalies", "Analyse des anomalies en cours...");
+    QStringList anomalies;
+
+    for (int r = 0; r < citernesTable->rowCount(); ++r) {
+        const int id = citernesTable->item(r, 0) ? citernesTable->item(r, 0)->text().toInt() : (r + 1);
+        const double capacity = citernesTable->item(r, 1) ? citernesTable->item(r, 1)->text().toDouble() : 0.0;
+        const double volume = citernesTable->item(r, 2) ? citernesTable->item(r, 2)->text().toDouble() : 0.0;
+        const double temp = citernesTable->item(r, 5) ? citernesTable->item(r, 5)->text().toDouble() : 20.0;
+
+        if (capacity <= 0.0) {
+            anomalies << QString("Citerne #%1: capacité invalide").arg(id);
+            continue;
+        }
+
+        const double fillPercent = (volume / capacity) * 100.0;
+        if (fillPercent < 10.0) {
+            anomalies << QString("Citerne #%1: niveau critique (%2%)").arg(id).arg(fillPercent, 0, 'f', 1);
+        } else if (fillPercent > 98.0) {
+            anomalies << QString("Citerne #%1: quasi-surcharge (%2%)").arg(id).arg(fillPercent, 0, 'f', 1);
+        }
+
+        if (temp < 5.0 || temp > 30.0) {
+            anomalies << QString("Citerne #%1: température anormale (%2°C)").arg(id).arg(temp, 0, 'f', 1);
+        }
+    }
+
+    if (anomalies.isEmpty()) {
+        QMessageBox::information(this, "Détection Anomalies", "Aucune anomalie détectée.");
+        return;
+    }
+
+    notificationHistory.append(anomalies);
+    QMessageBox::warning(this, "Détection Anomalies", "Anomalies détectées:\n- " + anomalies.join("\n- "));
 }
 
 void MainWindow::configureThresholds()
@@ -1473,8 +2378,12 @@ void MainWindow::configureThresholds()
 
 void MainWindow::viewFillingHistory()
 {
-    // Implementation for viewing filling history
-    QMessageBox::information(this, "Historique", "Historique des remplissages affichés.");
+    if (notificationHistory.isEmpty()) {
+        QMessageBox::information(this, "Historique", "Aucun événement enregistré.");
+        return;
+    }
+
+    QMessageBox::information(this, "Historique", notificationHistory.join("\n"));
 }
 
 bool MainWindow::promptAndTestOracleConnection()
@@ -1502,7 +2411,17 @@ bool MainWindow::promptAndTestOracleConnection()
     layout->addLayout(form);
 
     QDialogButtonBox *buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel);
-    connect(buttons, &QDialogButtonBox::accepted, &dlg, &QDialog::accept);
+    connect(buttons, &QDialogButtonBox::accepted, &dlg, [&]() {
+        if (dsnEdit->text().trimmed().isEmpty()) {
+            QMessageBox::warning(&dlg, "Saisie invalide", "Le DSN est obligatoire.");
+            return;
+        }
+        if (userEdit->text().trimmed().isEmpty()) {
+            QMessageBox::warning(&dlg, "Saisie invalide", "L'utilisateur est obligatoire.");
+            return;
+        }
+        dlg.accept();
+    });
     connect(buttons, &QDialogButtonBox::rejected, &dlg, &QDialog::reject);
     layout->addWidget(buttons);
 

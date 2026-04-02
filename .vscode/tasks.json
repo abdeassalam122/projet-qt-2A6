@@ -4,7 +4,7 @@
 		{
 			"label": "Build and run Qt app",
 			"type": "shell",
-			"command": "mingw32-make -C \"build/Desktop_Qt_6_7_3_MinGW_64_bit-Debug\"; .\\build\\Desktop_Qt_6_7_3_MinGW_64_bit-Debug\\debug\\awss.exe",
+			"command": "$env:Path = 'C:\\Qt\\6.11.0\\mingw_64\\bin;C:\\Qt\\Tools\\mingw1310_64\\bin;' + $env:Path; Get-Process awss -ErrorAction SilentlyContinue | Stop-Process -Force; mingw32-make -C \"build/Desktop_Qt_6_7_3_MinGW_64_bit-Debug\"; if ($LASTEXITCODE -eq 0) { .\\build\\Desktop_Qt_6_7_3_MinGW_64_bit-Debug\\debug\\awss.exe }",
 			"isBackground": false,
 			"problemMatcher": [],
 			"group": "build"
@@ -12,7 +12,7 @@
 		{
 			"label": "Build and run Qt app (MinGW full path)",
 			"type": "shell",
-			"command": "\"C:\\Qt\\Tools\\mingw1120_64\\bin\\mingw32-make.exe\" -C \"build\\Desktop_Qt_6_7_3_MinGW_64_bit-Debug\"; .\\build\\Desktop_Qt_6_7_3_MinGW_64_bit-Debug\\debug\\awss.exe",
+			"command": "$env:Path = 'C:\\Qt\\6.11.0\\mingw_64\\bin;C:\\Qt\\Tools\\mingw1310_64\\bin;' + $env:Path; Get-Process awss -ErrorAction SilentlyContinue | Stop-Process -Force; & 'C:\\Qt\\Tools\\mingw1310_64\\bin\\mingw32-make.exe' -C \"build\\Desktop_Qt_6_7_3_MinGW_64_bit-Debug\"; if ($LASTEXITCODE -eq 0) { .\\build\\Desktop_Qt_6_7_3_MinGW_64_bit-Debug\\debug\\awss.exe }",
 			"isBackground": false,
 			"problemMatcher": [],
 			"group": "build"

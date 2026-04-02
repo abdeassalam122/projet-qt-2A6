@@ -33,7 +33,7 @@ private slots:
     void switchToClients();
     void switchToCiternes();
     void switchToReception();
-    void switchToFacturation();
+    void switchToExtraction();
 
     // Clients module slots
     void showAddClientDialog();
@@ -83,7 +83,7 @@ private:
     QPushButton *btnClients = nullptr;
     QPushButton *btnCiternes = nullptr;
     QPushButton *btnReception = nullptr;
-    QPushButton *btnFacturation = nullptr;
+    QPushButton *btnExtraction = nullptr;
     QTabBar *moduleTabs = nullptr;
 
     // Stack and pages
@@ -91,7 +91,8 @@ private:
     QWidget *clientsPage = nullptr;
     QWidget *citernesPage = nullptr;
     QWidget *receptionPage = nullptr;
-    QWidget *facturationPage = nullptr;
+    QWidget *extractionPage = nullptr;
+    QWidget *statisticsPage = nullptr;
 
     // Clients widgets
     QTableWidget *clientsTable = nullptr;
@@ -104,6 +105,18 @@ private:
     QPushButton *exportButton = nullptr;
     QPushButton *statsButton = nullptr;
     QPushButton *backFromStatsButton = nullptr;
+    QLabel *statsTotalClientsValue = nullptr;
+    QLabel *statsActiveClientsValue = nullptr;
+    QLabel *statsInactiveClientsValue = nullptr;
+    QLabel *statsNewThisMonthValue = nullptr;
+    QLabel *statsCompleteProfilesValue = nullptr;
+    QLabel *statsStatusBreakdownValue = nullptr;
+    QLabel *statsTopCityValue = nullptr;
+    QLabel *statsDonutChartLabel = nullptr;
+    QLabel *statsLegendActiveValue = nullptr;
+    QLabel *statsLegendInactiveValue = nullptr;
+    QLabel *statsLegendUndefinedValue = nullptr;
+    QLabel *statsLegendOtherValue = nullptr;
 
     // Citernes widgets
     QTableWidget *citernesTable = nullptr;
@@ -126,7 +139,7 @@ private:
     void createClientsPage();
     void createCiternesPage();
     void createReceptionPage();
-    void createFacturationPage();
+    void createExtractionPage();
     void createStatisticsPage();
 
     // Styling & data
@@ -137,6 +150,8 @@ private:
     // Helpers
     int findClientRowById(int id);
     int findCiterneRowById(int id);
+    void updateClientStatistics();
+    QStringList buildCiterneAlerts(double thresholdPercent, int *criticalCount = nullptr, int *warningCount = nullptr, int *normalCount = nullptr) const;
 
     // Progress widget helpers (DECLARED HERE to avoid "undeclared identifier")
     QWidget* createProgressWidget(int percent);
