@@ -1,6 +1,5 @@
 #include "mainwindow.h"
 #include <QApplication>
-<<<<<<< HEAD
 #include <QMessageBox>
 #include <QTimer>
 #include <QSqlDatabase>
@@ -8,13 +7,10 @@
 #include <QSqlError>
 #include <QDebug>
 #include "connection.h"
-=======
->>>>>>> b329a1b3fa3d42c3171c81d32f3580292407b86c
 
 int main(int argc, char *argv[])
 {
     QApplication a(argc, argv);
-<<<<<<< HEAD
 
     qDebug() << "Starting application...";
 
@@ -43,9 +39,6 @@ int main(int argc, char *argv[])
 
     qDebug() << "Application started successfully";
 
-=======
-    MainWindow w;
     w.show();
->>>>>>> b329a1b3fa3d42c3171c81d32f3580292407b86c
     return a.exec();
 }

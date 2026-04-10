@@ -1,7 +1,3 @@
-
-
-
-
 #include "connection.h"
 #include <QSqlError>
 #include <QDebug>
@@ -25,7 +21,7 @@ Connection* Connection::instance()
     return p_instance;
 }
 
-// Méthode pour établir la connexion
+// Méthode pour établir la connexion (version originale)
 bool Connection::createConnect()
 {
     bool test = false;
@@ -44,6 +40,24 @@ bool Connection::createConnect()
     return test;
 }
 
+// Nouvelle méthode pour la connexion ODBC avec paramètres
+bool Connection::openOdbcConnection(const QString &dsn, const QString &user,
+                                    const QString &password, QString &lastError)
+{
+    db.setDatabaseName(dsn);
+    db.setUserName(user);
+    db.setPassword(password);
+
+    if (!db.open()) {
+        lastError = db.lastError().text();
+        qDebug() << "Erreur de connexion:" << lastError;
+        return false;
+    }
+
+    qDebug() << "Connexion ODBC réussie à la base Oracle";
+    return true;
+}
+
 // Fermer la connexion
 void Connection::closeConnection()
 {
@@ -52,13 +66,20 @@ void Connection::closeConnection()
     }
 }
 
+// Retourne la base de données
+QSqlDatabase Connection::database() const
+{
+    return db;
+}
+
+// Vérifie si la connexion est ouverte
+bool Connection::isOpen() const
+{
+    return db.isOpen();
+}
+
 // Destructeur privé
 Connection::~Connection()
 {
     closeConnection();
 }
-
-
-
-
-

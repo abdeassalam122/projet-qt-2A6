@@ -11,6 +11,12 @@ public:
     bool createConnect(); // Méthode pour créer la connexion
     void closeConnection(); // Fermer la connexion
 
+    // Ajoutez ces méthodes pour compatibilité avec mainwindow.cpp
+    bool openOdbcConnection(const QString &dsn, const QString &user,
+                            const QString &password, QString &lastError);
+    QSqlDatabase database() const;
+    bool isOpen() const;
+
 private:
     Connection(); // Constructeur privé
     ~Connection(); // Destructeur privé
@@ -22,4 +28,3 @@ private:
 };
 
 #endif // CONNECTION_H
-

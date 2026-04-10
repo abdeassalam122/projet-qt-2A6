@@ -3,7 +3,7 @@
 
 #include <QMainWindow>
 #include <QWidget>
-<<<<<<< HEAD
+
 #include <QStackedWidget>
 #include <QTabBar>
 #include <QButtonGroup>
@@ -13,7 +13,7 @@
 #include <QTableWidget>
 #include <QStringList>
 #include <QHeaderView>
-=======
+
 #include <QVBoxLayout>
 #include <QHBoxLayout>
 #include <QTableWidget>
@@ -30,41 +30,23 @@
 #include <QButtonGroup>
 #include <QTabBar>
 #include <QSqlDatabase>
->>>>>>> b329a1b3fa3d42c3171c81d32f3580292407b86c
 
 class MainWindow : public QMainWindow
 {
     Q_OBJECT
 
 public:
-<<<<<<< HEAD
-    MainWindow(QWidget *parent = nullptr);
+    explicit MainWindow(QWidget *parent = nullptr);  // Fixed: added 'explicit' and removed duplicate
     ~MainWindow();
 
 private slots:
-    // Réception
+    // Réception slots
     void showAddReceptionDialog();
     void editSelectedReception();
     void deleteSelectedReception();
     void searchReception(const QString &text);
     void refreshReceptionData();
 
-private:
-    // UI Setup methods
-    void setupUI(); // You need to add this if it exists
-    void createReceptionPage(); // ADD THIS DECLARATION
-    QWidget* createHeaderWidget(const QString &title); // ADD THIS DECLARATION
-
-    // Réception widgets
-    QTableWidget *receptionTable;
-    QLineEdit *searchBoxReception;
-    QWidget *receptionPage; // ADD THIS - missing member variable
-    QStackedWidget *stackedWidget; // ADD THIS - missing member variable
-=======
-    explicit MainWindow(QWidget *parent = nullptr);
-    ~MainWindow() override;
-
-private slots:
     // Navigation slots
     void switchToClients();
     void switchToCiternes();
@@ -90,18 +72,18 @@ private slots:
     void searchCiternes(const QString &text);
     void sortCiternes();
     void exportCiternes();
-    
+
     // Quality simulator slots
     void openBlendingSimulator();
     void performBlending();
     void calculateBlendingResult();
-    
+
     // Notification & Alert slots
     void checkLowLevelAlerts();
     void showNotifications();
     void configureThresholds();
     void viewFillingHistory();
-    
+
     // Predictive maintenance slots
     void checkPredictiveAlerts();
     void showEquipmentStatus();
@@ -112,6 +94,14 @@ private slots:
     void showMainListView();
 
 private:
+    // UI Setup methods
+    void setupUI();
+    void createReceptionPage();
+    QWidget* createHeaderWidget(const QString &title);
+    void createClientsPage();
+    void createCiternesPage();
+    void createExtractionPage();
+    void createStatisticsPage();
     // Main layout and sidebar
     QWidget *central = nullptr;
     QWidget* createSideBar();
@@ -123,12 +113,16 @@ private:
     QTabBar *moduleTabs = nullptr;
 
     // Stack and pages
-    QStackedWidget *stackedWidget = nullptr;
+    QStackedWidget *stackedWidget = nullptr;  // Moved here and initialized
     QWidget *clientsPage = nullptr;
     QWidget *citernesPage = nullptr;
-    QWidget *receptionPage = nullptr;
+    QWidget *receptionPage = nullptr;  // Only declared once now
     QWidget *extractionPage = nullptr;
     QWidget *statisticsPage = nullptr;
+
+    // Réception widgets
+    QTableWidget *receptionTable = nullptr;
+    QLineEdit *searchBoxReception = nullptr;
 
     // Clients widgets
     QTableWidget *clientsTable = nullptr;
@@ -163,20 +157,11 @@ private:
     QPushButton *detailsCiterneBtn = nullptr;
     QPushButton *blendingBtn = nullptr;
     QPushButton *alertsBtn = nullptr;
-    
+
     // Quality simulation & Notification data
     double lowLevelThreshold = 30.0; // Configurable threshold
     QStringList notificationHistory;
     QList<int> qualitySelectedRows;
-
-    // Build UI
-    void setupUI();
-    QWidget* createHeaderWidget(const QString &title);
-    void createClientsPage();
-    void createCiternesPage();
-    void createReceptionPage();
-    void createExtractionPage();
-    void createStatisticsPage();
 
     // Styling & data
     void applyStyles();
@@ -189,9 +174,9 @@ private:
     void updateClientStatistics();
     QStringList buildCiterneAlerts(double thresholdPercent, int *criticalCount = nullptr, int *warningCount = nullptr, int *normalCount = nullptr) const;
 
-    // Progress widget helpers (DECLARED HERE to avoid "undeclared identifier")
+    // Progress widget helpers
     QWidget* createProgressWidget(int percent);
-    QWidget* createProgressBar(int percent); // alias used in code
+    QWidget* createProgressBar(int percent);
 
     bool promptAndTestOracleConnection();
     void updateDatabaseStatusLabel();
@@ -204,7 +189,6 @@ private:
     QSqlDatabase db;
     QLabel *dbStatusLabel = nullptr;
     bool oracleActive = false;
->>>>>>> b329a1b3fa3d42c3171c81d32f3580292407b86c
 };
 
 #endif // MAINWINDOW_H

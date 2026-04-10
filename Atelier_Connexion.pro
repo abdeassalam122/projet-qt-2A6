@@ -28,15 +28,19 @@ SOURCES += \
         main.cpp \
         mainwindow.cpp \
     connection.cpp \
-    reception.cpp
+    reception.cpp \
+    client.cpp \          # AJOUTEZ CETTE LIGNE
+    citerne.cpp           # AJOUTEZ CETTE LIGNE
 
 HEADERS += \
         mainwindow.h \
     connection.h \
-    reception.h
+    reception.h \
+    client.h \            # AJOUTEZ CETTE LIGNE
+    citerne.h             # AJOUTEZ CETTE LIGNE
 
-FORMS += \
-        mainwindow.ui
+# FORMS += \              # COMMENTEZ OU SUPPRIMEZ
+#        mainwindow.ui
 
 # Default rules for deployment.
 qnx: target.path = /tmp/$${TARGET}/bin

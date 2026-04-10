@@ -1,12 +1,9 @@
 #include "mainwindow.h"
-<<<<<<< HEAD
 #include "reception.h"
-=======
 #include "connexion.h"
 #include "client.h"
 #include "citerne.h"
 
->>>>>>> b329a1b3fa3d42c3171c81d32f3580292407b86c
 #include <QMessageBox>
 #include <QFormLayout>
 #include <QDate>
@@ -16,10 +13,8 @@
 #include <QInputDialog>
 #include <QVBoxLayout>
 #include <QHBoxLayout>
-<<<<<<< HEAD
-=======
+
 #include <QGridLayout>
->>>>>>> b329a1b3fa3d42c3171c81d32f3580292407b86c
 #include <QProgressBar>
 #include <QCheckBox>
 #include <QSpinBox>
@@ -27,14 +22,12 @@
 #include <QListWidget>
 #include <QGroupBox>
 #include <QSqlQuery>
-<<<<<<< HEAD
 #include <QSqlQueryModel>
 #include <QSqlError>
 #include <QDebug>
 #include <QHeaderView>
 #include <QRegularExpression>
 #include <QRegularExpressionValidator>
-=======
 #include <QSqlError>
 #include <QSqlRecord>
 #include <QRegularExpression>
@@ -127,7 +120,6 @@ QString formatLegendLine(const QString &name, int value, int total)
 }
 
 } // namespace
->>>>>>> b329a1b3fa3d42c3171c81d32f3580292407b86c
 
 // ============================================================================
 // CONSTRUCTOR / DESTRUCTOR
@@ -135,7 +127,6 @@ QString formatLegendLine(const QString &name, int value, int total)
 MainWindow::MainWindow(QWidget *parent)
     : QMainWindow(parent)
 {
-<<<<<<< HEAD
     // Initialize member variables
     stackedWidget = new QStackedWidget(this);
     setCentralWidget(stackedWidget);
@@ -151,7 +142,6 @@ MainWindow::MainWindow(QWidget *parent)
 
     // Set minimum size
     setMinimumSize(1000, 600);
-=======
     setupUI();
     applyStyles();
     oracleActive = promptAndTestOracleConnection();
@@ -167,12 +157,10 @@ MainWindow::MainWindow(QWidget *parent)
         populateClientsSampleData();
         populateCiternesSampleData();
     }
->>>>>>> b329a1b3fa3d42c3171c81d32f3580292407b86c
 }
 
 MainWindow::~MainWindow()
 {
-<<<<<<< HEAD
 }
 
 // ============================================================================
@@ -201,14 +189,92 @@ QWidget* MainWindow::createHeaderWidget(const QString &title)
 // PAGE RÉCEPTION - Interface uniquement (sans requêtes SQL)
 // ============================================================================
 
+// ============================================================================
+// RECEPTION PAGE - Interface complète comme les autres pages
+// ============================================================================
+
 void MainWindow::createReceptionPage()
 {
     receptionPage = new QWidget();
+    receptionPage->setObjectName("receptionPage");
     QVBoxLayout *mainLay = new QVBoxLayout(receptionPage);
-=======
-    if (db.isValid() && db.isOpen()) {
-        db.close();
-    }
+    mainLay->setContentsMargins(12,12,12,12);
+    mainLay->setSpacing(8);
+
+    // Header
+    mainLay->addWidget(createHeaderWidget("Gestion des Réceptions"));
+
+    // Content
+    QWidget *content = new QWidget();
+    content->setObjectName("moduleCard");
+    QVBoxLayout *contentLay = new QVBoxLayout(content);
+    contentLay->setContentsMargins(8,8,8,8);
+    contentLay->setSpacing(10);
+
+    // Controls row (search + buttons)
+    QHBoxLayout *ctrl = new QHBoxLayout();
+
+    searchBoxReception = new QLineEdit();
+    searchBoxReception->setObjectName("searchBoxReception");
+    searchBoxReception->setPlaceholderText("Rechercher par LOT...");
+    searchBoxReception->setFixedHeight(34);
+    connect(searchBoxReception, &QLineEdit::textChanged, this, &MainWindow::searchReception);
+
+    QPushButton *addBtn = new QPushButton("+ Ajouter");
+    addBtn->setProperty("role", "primary");
+    addBtn->setFixedSize(110,34);
+    connect(addBtn, &QPushButton::clicked, this, &MainWindow::showAddReceptionDialog);
+
+    QPushButton *editBtn = new QPushButton("✎ Modifier");
+    editBtn->setProperty("role", "secondary");
+    editBtn->setFixedSize(110,34);
+    connect(editBtn, &QPushButton::clicked, this, &MainWindow::editSelectedReception);
+
+    QPushButton *delBtn = new QPushButton("🗑 Supprimer");
+    delBtn->setProperty("role", "danger");
+    delBtn->setFixedSize(120,34);
+    connect(delBtn, &QPushButton::clicked, this, &MainWindow::deleteSelectedReception);
+
+    QPushButton *refreshBtn = new QPushButton("🔄 Rafraîchir");
+    refreshBtn->setProperty("role", "secondary");
+    refreshBtn->setFixedSize(110,34);
+    connect(refreshBtn, &QPushButton::clicked, this, &MainWindow::refreshReceptionData);
+
+    ctrl->addWidget(searchBoxReception);
+    ctrl->addWidget(addBtn);
+    ctrl->addWidget(editBtn);
+    ctrl->addWidget(delBtn);
+    ctrl->addWidget(refreshBtn);
+    ctrl->addStretch();
+    contentLay->addLayout(ctrl);
+
+    // Table Réception
+    receptionTable = new QTableWidget();
+    receptionTable->setObjectName("receptionTable");
+    receptionTable->setColumnCount(7);
+    receptionTable->setHorizontalHeaderLabels({"ID", "Lot", "Date", "Quantité (kg)", "Qualité", "Client ID", "Statut"});
+
+    receptionTable->horizontalHeader()->setSectionResizeMode(1, QHeaderView::Stretch);
+    receptionTable->horizontalHeader()->setSectionResizeMode(2, QHeaderView::ResizeToContents);
+    receptionTable->horizontalHeader()->setSectionResizeMode(3, QHeaderView::ResizeToContents);
+    receptionTable->horizontalHeader()->setSectionResizeMode(4, QHeaderView::ResizeToContents);
+    receptionTable->horizontalHeader()->setSectionResizeMode(5, QHeaderView::ResizeToContents);
+    receptionTable->horizontalHeader()->setSectionResizeMode(6, QHeaderView::ResizeToContents);
+
+    receptionTable->setSelectionBehavior(QAbstractItemView::SelectRows);
+    receptionTable->setEditTriggers(QAbstractItemView::NoEditTriggers);
+    receptionTable->verticalHeader()->setVisible(false);
+    receptionTable->setAlternatingRowColors(true);
+    receptionTable->setShowGrid(false);
+
+    contentLay->addWidget(receptionTable);
+
+    mainLay->addWidget(content);
+
+    // Charger les données
+    refreshReceptionData();
+
+    stackedWidget->addWidget(receptionPage);
 }
 
 // ============================================================================
@@ -363,74 +429,103 @@ void MainWindow::createClientsPage()
     clientsPage = new QWidget();
     clientsPage->setObjectName("clientsPage");
     QVBoxLayout *mainLay = new QVBoxLayout(clientsPage);
->>>>>>> b329a1b3fa3d42c3171c81d32f3580292407b86c
     mainLay->setContentsMargins(12,12,12,12);
     mainLay->setSpacing(8);
 
     // Header
-<<<<<<< HEAD
-    mainLay->addWidget(createHeaderWidget("Gestion des Réceptions"));
+    mainLay->addWidget(createHeaderWidget("Gestion des Clients"));
 
-    // ======= Controls row (search + buttons) =======
+    // Controls + table
+    QWidget *content = new QWidget();
+    content->setObjectName("moduleCard");
+    QVBoxLayout *contentLay = new QVBoxLayout(content);
+    contentLay->setContentsMargins(8,8,8,8);
+    contentLay->setSpacing(10);
+
+    // Controls row
     QHBoxLayout *ctrl = new QHBoxLayout();
+    searchBox = new QLineEdit();
+    searchBox->setObjectName("searchBox");
+    searchBox->setPlaceholderText("Rechercher (nom, email, téléphone)...");
+    searchBox->setFixedHeight(34);
+    connect(searchBox, &QLineEdit::textChanged, this, &MainWindow::searchClients);
 
-    searchBoxReception = new QLineEdit();
-    searchBoxReception->setObjectName("searchBoxReception");
-    searchBoxReception->setPlaceholderText("Rechercher par LOT (ex: LOT-001) ...");
-    searchBoxReception->setFixedHeight(34);
-    connect(searchBoxReception, &QLineEdit::textChanged, this, &MainWindow::searchReception);
+    sortButton = new QPushButton("Trier");
+    sortButton->setProperty("role", "secondary");
+    sortButton->setFixedSize(80,34);
+    connect(sortButton, &QPushButton::clicked, this, &MainWindow::sortClients);
 
-    QPushButton *addBtn = new QPushButton("+ Ajouter");
-    addBtn->setFixedSize(110,34);
-    connect(addBtn, &QPushButton::clicked, this, &MainWindow::showAddReceptionDialog);
+    exportButton = new QPushButton("Exporter");
+    exportButton->setProperty("role", "secondary");
+    exportButton->setFixedSize(100,34);
+    connect(exportButton, &QPushButton::clicked, this, &MainWindow::exportClients);
 
-    QPushButton *editBtn = new QPushButton("✎ Modifier");
-    editBtn->setFixedSize(110,34);
-    connect(editBtn, &QPushButton::clicked, this, &MainWindow::editSelectedReception);
+    statsButton = new QPushButton("Statistiques");
+    statsButton->setProperty("role", "accent");
+    statsButton->setFixedSize(110,34);
+    connect(statsButton, &QPushButton::clicked, this, &MainWindow::showStatisticsView);
 
-    QPushButton *delBtn = new QPushButton("🗑 Supprimer");
-    delBtn->setFixedSize(120,34);
-    connect(delBtn, &QPushButton::clicked, this, &MainWindow::deleteSelectedReception);
-
-    QPushButton *refreshBtn = new QPushButton("🔄 Rafraîchir");
-    refreshBtn->setFixedSize(110,34);
-    connect(refreshBtn, &QPushButton::clicked, this, &MainWindow::refreshReceptionData);
-
-    ctrl->addWidget(searchBoxReception);
-    ctrl->addWidget(addBtn);
-    ctrl->addWidget(editBtn);
-    ctrl->addWidget(delBtn);
-    ctrl->addWidget(refreshBtn);
+    ctrl->addWidget(searchBox);
+    ctrl->addWidget(sortButton);
+    ctrl->addWidget(exportButton);
+    ctrl->addWidget(statsButton);
     ctrl->addStretch();
-    mainLay->addLayout(ctrl);
 
-    // ======= Table Réception =======
-    receptionTable = new QTableWidget();
-    receptionTable->setObjectName("receptionTable");
-    receptionTable->setColumnCount(7);
-    receptionTable->setHorizontalHeaderLabels({"ID", "Lot", "Date", "Quantité (kg)", "Qualité", "Client ID", "Statut"});
+    contentLay->addLayout(ctrl);
 
-    receptionTable->horizontalHeader()->setSectionResizeMode(1, QHeaderView::Stretch);
-    receptionTable->horizontalHeader()->setSectionResizeMode(2, QHeaderView::ResizeToContents);
-    receptionTable->horizontalHeader()->setSectionResizeMode(3, QHeaderView::ResizeToContents);
-    receptionTable->horizontalHeader()->setSectionResizeMode(4, QHeaderView::ResizeToContents);
-    receptionTable->horizontalHeader()->setSectionResizeMode(5, QHeaderView::ResizeToContents);
-    receptionTable->horizontalHeader()->setSectionResizeMode(6, QHeaderView::ResizeToContents);
+    // Table
+    clientsTable = new QTableWidget();
+    clientsTable->setColumnCount(8);
+    clientsTable->setHorizontalHeaderLabels({"ID","Nom","Email","Téléphone","Adresse","Inscrit le","Statut","Actions"});
+    clientsTable->horizontalHeader()->setSectionResizeMode(1, QHeaderView::Stretch);
+    clientsTable->horizontalHeader()->setSectionResizeMode(2, QHeaderView::ResizeToContents);
+    clientsTable->horizontalHeader()->setSectionResizeMode(3, QHeaderView::ResizeToContents);
+    clientsTable->horizontalHeader()->setSectionResizeMode(4, QHeaderView::Stretch);
+    clientsTable->horizontalHeader()->setSectionResizeMode(7, QHeaderView::ResizeToContents);
+    clientsTable->setSelectionBehavior(QAbstractItemView::SelectRows);
+    clientsTable->setEditTriggers(QAbstractItemView::NoEditTriggers);
+    clientsTable->verticalHeader()->setVisible(false);
+    clientsTable->verticalHeader()->setDefaultSectionSize(44);
+    clientsTable->verticalHeader()->setMinimumSectionSize(40);
+    clientsTable->setAlternatingRowColors(true);
+    clientsTable->setShowGrid(false);
+    clientsTable->setObjectName("clientsTable");
+    contentLay->addWidget(clientsTable);
 
-    receptionTable->setSelectionBehavior(QAbstractItemView::SelectRows);
-    receptionTable->setEditTriggers(QAbstractItemView::NoEditTriggers);
-    receptionTable->verticalHeader()->setVisible(false);
-    receptionTable->setSelectionMode(QAbstractItemView::SingleSelection);
+    // Action buttons
+    QHBoxLayout *actions = new QHBoxLayout();
+    addButton = new QPushButton("+ Ajouter");
+    addButton->setProperty("role", "primary");
+    addButton->setFixedSize(120,36);
+    connect(addButton, &QPushButton::clicked, this, &MainWindow::showAddClientDialog);
 
-    mainLay->addWidget(receptionTable);
+    editButton = new QPushButton("✎ Éditer");
+    editButton->setProperty("role", "secondary");
+    editButton->setFixedSize(100,36);
+    connect(editButton, &QPushButton::clicked, this, &MainWindow::editSelectedClient);
 
-    // Charger les données
-    refreshReceptionData();
+    viewButton = new QPushButton("👁 Voir");
+    viewButton->setProperty("role", "secondary");
+    viewButton->setFixedSize(100,36);
+    connect(viewButton, &QPushButton::clicked, this, &MainWindow::viewSelectedClient);
 
-    // Add to stacked widget
-    stackedWidget->addWidget(receptionPage);
+    deleteButton = new QPushButton("🗑 Supprimer");
+    deleteButton->setProperty("role", "danger");
+    deleteButton->setFixedSize(120,36);
+    connect(deleteButton, &QPushButton::clicked, this, &MainWindow::deleteSelectedClient);
+
+    actions->addWidget(addButton);
+    actions->addWidget(editButton);
+    actions->addWidget(viewButton);
+    actions->addWidget(deleteButton);
+    actions->addStretch();
+
+    contentLay->addLayout(actions);
+
+    mainLay->addWidget(content);
+
+    stackedWidget->addWidget(clientsPage);
 }
-
 // ============================================================================
 // FONCTIONS D'INTERFACE RÉCEPTION (appellent la classe Reception)
 // ============================================================================
@@ -692,102 +787,7 @@ void MainWindow::refreshReceptionData()
 
     qDebug() << "Réceptions chargées depuis la base ✅ -" << model->rowCount() << "lignes";
     delete model;
-=======
-    QWidget *hdr = createHeaderWidget("Gestion des Clients");
-    mainLay->addWidget(hdr);
-
-    // Controls + table
-    QWidget *content = new QWidget();
-    content->setObjectName("moduleCard");
-    QVBoxLayout *contentLay = new QVBoxLayout(content);
-    contentLay->setContentsMargins(8,8,8,8);
-    contentLay->setSpacing(10);
-
-    // Controls row
-    QHBoxLayout *ctrl = new QHBoxLayout();
-    searchBox = new QLineEdit();
-    searchBox->setObjectName("searchBox");
-    searchBox->setPlaceholderText("Rechercher (nom, email, téléphone)...");
-    searchBox->setFixedHeight(34);
-    connect(searchBox, &QLineEdit::textChanged, this, &MainWindow::searchClients);
-
-    sortButton = new QPushButton("Trier");
-    sortButton->setProperty("role", "secondary");
-    sortButton->setFixedSize(80,34);
-    connect(sortButton, &QPushButton::clicked, this, &MainWindow::sortClients);
-
-    exportButton = new QPushButton("Exporter");
-    exportButton->setProperty("role", "secondary");
-    exportButton->setFixedSize(100,34);
-    connect(exportButton, &QPushButton::clicked, this, &MainWindow::exportClients);
-
-    statsButton = new QPushButton("Statistiques");
-    statsButton->setProperty("role", "accent");
-    statsButton->setFixedSize(110,34);
-    connect(statsButton, &QPushButton::clicked, this, &MainWindow::showStatisticsView);
-
-    ctrl->addWidget(searchBox);
-    ctrl->addWidget(sortButton);
-    ctrl->addWidget(exportButton);
-    ctrl->addWidget(statsButton);
-    ctrl->addStretch();
-
-    contentLay->addLayout(ctrl);
-
-    // Table
-    clientsTable = new QTableWidget();
-    clientsTable->setColumnCount(8);
-    clientsTable->setHorizontalHeaderLabels({"ID","Nom","Email","Téléphone","Adresse","Inscrit le","Statut","Actions"});
-    clientsTable->horizontalHeader()->setSectionResizeMode(1, QHeaderView::Stretch);
-    clientsTable->horizontalHeader()->setSectionResizeMode(2, QHeaderView::ResizeToContents);
-    clientsTable->horizontalHeader()->setSectionResizeMode(3, QHeaderView::ResizeToContents);
-    clientsTable->horizontalHeader()->setSectionResizeMode(4, QHeaderView::Stretch);
-    clientsTable->horizontalHeader()->setSectionResizeMode(7, QHeaderView::ResizeToContents);
-    clientsTable->setSelectionBehavior(QAbstractItemView::SelectRows);
-    clientsTable->setEditTriggers(QAbstractItemView::NoEditTriggers);
-    clientsTable->verticalHeader()->setVisible(false);
-    clientsTable->verticalHeader()->setDefaultSectionSize(44);
-    clientsTable->verticalHeader()->setMinimumSectionSize(40);
-    clientsTable->setAlternatingRowColors(true);
-    clientsTable->setShowGrid(false);
-    clientsTable->setObjectName("clientsTable");
-    contentLay->addWidget(clientsTable);
-
-    // Action buttons
-    QHBoxLayout *actions = new QHBoxLayout();
-    addButton = new QPushButton("+ Ajouter");
-    addButton->setProperty("role", "primary");
-    addButton->setFixedSize(120,36);
-    connect(addButton, &QPushButton::clicked, this, &MainWindow::showAddClientDialog);
-
-    editButton = new QPushButton("✎ Éditer");
-    editButton->setProperty("role", "secondary");
-    editButton->setFixedSize(100,36);
-    connect(editButton, &QPushButton::clicked, this, &MainWindow::editSelectedClient);
-
-    viewButton = new QPushButton("👁 Voir");
-    viewButton->setProperty("role", "secondary");
-    viewButton->setFixedSize(100,36);
-    connect(viewButton, &QPushButton::clicked, this, &MainWindow::viewSelectedClient);
-
-    deleteButton = new QPushButton("🗑 Supprimer");
-    deleteButton->setProperty("role", "danger");
-    deleteButton->setFixedSize(120,36);
-    connect(deleteButton, &QPushButton::clicked, this, &MainWindow::deleteSelectedClient);
-
-    actions->addWidget(addButton);
-    actions->addWidget(editButton);
-    actions->addWidget(viewButton);
-    actions->addWidget(deleteButton);
-    actions->addStretch();
-
-    contentLay->addLayout(actions);
-
-    mainLay->addWidget(content);
-
-    stackedWidget->addWidget(clientsPage);
 }
-
 // ============================================================================
 // CITERNE PAGE - reuse simple table + actions (you can expand later)
 // ============================================================================
@@ -897,17 +897,7 @@ void MainWindow::createCiternesPage()
 // ============================================================================
 // RECEPTION and EXTRACTION pages (simple placeholders to extend later)
 // ============================================================================
-void MainWindow::createReceptionPage()
-{
-    receptionPage = new QWidget();
-    QVBoxLayout *l = new QVBoxLayout(receptionPage);
-    l->addWidget(createHeaderWidget("Réception"));
-    QLabel *lbl = new QLabel("Module Réception - à implémenter");
-    lbl->setWordWrap(true);
-    l->addWidget(lbl);
-    l->addStretch();
-    stackedWidget->addWidget(receptionPage);
-}
+
 
 void MainWindow::createExtractionPage()
 {
@@ -1091,20 +1081,6 @@ void MainWindow::createStatisticsPage()
 // ============================================================================
 // HEADER CREATOR (for pages)
 // ============================================================================
-QWidget* MainWindow::createHeaderWidget(const QString &title)
-{
-    QWidget *header = new QWidget();
-    header->setObjectName("pageHeader");
-    header->setFixedHeight(56);
-    QHBoxLayout *h = new QHBoxLayout(header);
-    h->setContentsMargins(16,8,16,8);
-    QLabel *lbl = new QLabel(title);
-    lbl->setStyleSheet("font-size:18px; font-weight:700; color:#FFFFFF;");
-    h->addWidget(lbl);
-    h->addStretch();
-    header->setStyleSheet("background-color:#0A5F58;");
-    return header;
-}
 
 // ============================================================================
 // STYLES
@@ -2863,5 +2839,4 @@ void MainWindow::updateDatabaseStatusLabel()
         dbStatusLabel->setText("Base Oracle: non connectée\nMode démonstration actif");
         dbStatusLabel->setStyleSheet("padding:8px; border-radius:8px; background:#5C2B2B; color:#FFFFFF;");
     }
->>>>>>> b329a1b3fa3d42c3171c81d32f3580292407b86c
 }
