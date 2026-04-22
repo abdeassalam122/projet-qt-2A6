@@ -47,6 +47,13 @@ private slots:
     void searchReception(const QString &text);
     void refreshReceptionData();
 
+    // Extraction slots
+    void showAddExtractionDialog();
+    void editSelectedExtraction();
+    void deleteSelectedExtraction();
+    void searchExtraction(const QString &text);
+    void refreshExtractionData();
+
     // Navigation slots
     void switchToClients();
     void switchToCiternes();
@@ -61,6 +68,8 @@ private slots:
     void sortClients();
     void exportClients();
     void searchClients(const QString &text);
+    void showClientComparisonDashboard();
+    void showClientRfmMatrix();
 
     // Citernes module slots (advanced)
     void showAddCiterneDialog();
@@ -72,6 +81,7 @@ private slots:
     void searchCiternes(const QString &text);
     void sortCiternes();
     void exportCiternes();
+    void showCiterneStatistics();
 
     // Quality simulator slots
     void openBlendingSimulator();
@@ -92,6 +102,7 @@ private slots:
     // Navigation between pages
     void showStatisticsView();
     void showMainListView();
+    void showMainCiterneListView();
 
 private:
     // UI Setup methods
@@ -102,6 +113,7 @@ private:
     void createCiternesPage();
     void createExtractionPage();
     void createStatisticsPage();
+    void createCiterneStatisticsPage();
     // Main layout and sidebar
     QWidget *central = nullptr;
     QWidget* createSideBar();
@@ -119,10 +131,15 @@ private:
     QWidget *receptionPage = nullptr;  // Only declared once now
     QWidget *extractionPage = nullptr;
     QWidget *statisticsPage = nullptr;
+    QWidget *citerneStatisticsPage = nullptr;
 
     // Réception widgets
     QTableWidget *receptionTable = nullptr;
     QLineEdit *searchBoxReception = nullptr;
+
+    // Extraction widgets
+    QTableWidget *extractionTable = nullptr;
+    QLineEdit *searchBoxExtraction = nullptr;
 
     // Clients widgets
     QTableWidget *clientsTable = nullptr;
@@ -148,6 +165,21 @@ private:
     QLabel *statsLegendUndefinedValue = nullptr;
     QLabel *statsLegendOtherValue = nullptr;
 
+    // Citernes statistics widgets
+    QPushButton *backFromCiterneStatsButton = nullptr;
+    QLabel *citerneStatsTotalValue = nullptr;
+    QLabel *citerneStatsCapacityValue = nullptr;
+    QLabel *citerneStatsVolumeValue = nullptr;
+    QLabel *citerneStatsFillRateValue = nullptr;
+    QLabel *citerneStatsTempValue = nullptr;
+    QLabel *citerneStatsCriticalValue = nullptr;
+    QLabel *citerneStatsBreakdownValue = nullptr;
+    QLabel *citerneStatsTopQualityValue = nullptr;
+    QLabel *citerneStatsDonutChartLabel = nullptr;
+    QLabel *citerneStatsLegendCriticalValue = nullptr;
+    QLabel *citerneStatsLegendWarningValue = nullptr;
+    QLabel *citerneStatsLegendNormalValue = nullptr;
+
     // Citernes widgets
     QTableWidget *citernesTable = nullptr;
     QLineEdit *searchBoxCiternes = nullptr;
@@ -172,6 +204,7 @@ private:
     int findClientRowById(int id);
     int findCiterneRowById(int id);
     void updateClientStatistics();
+    void updateCiterneStatistics();
     QStringList buildCiterneAlerts(double thresholdPercent, int *criticalCount = nullptr, int *warningCount = nullptr, int *normalCount = nullptr) const;
 
     // Progress widget helpers

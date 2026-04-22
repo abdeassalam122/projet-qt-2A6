@@ -1,6 +1,7 @@
 #include "connection.h"
 #include <QSqlError>
 #include <QDebug>
+#include <QList>
 
 // Initialisation du pointeur d'instance
 Connection* Connection::p_instance = nullptr;
@@ -8,7 +9,6 @@ Connection* Connection::p_instance = nullptr;
 // Constructeur privé
 Connection::Connection()
 {
-    // Initialisation de la base de données
     db = QSqlDatabase::addDatabase("QODBC");
 }
 
@@ -24,20 +24,37 @@ Connection* Connection::instance()
 // Méthode pour établir la connexion (version originale)
 bool Connection::createConnect()
 {
-    bool test = false;
+    struct OdbcAttempt {
+        QString databaseName;
+        QString description;
+    };
 
-    db.setDatabaseName("Source_Projet2A");//inserer le nom de la source de données
-    db.setUserName("mohamed");//inserer nom de l'utilisateur
-    db.setPassword("1234");//inserer mot de passe de cet utilisateur
+    const QList<OdbcAttempt> attempts = {
+        {QStringLiteral("Driver={Oracle in XE};Dbq=//localhost:1521/XE;"), QStringLiteral("ODBC Oracle in XE via host/service")},
+        {QStringLiteral("Driver={Oracle in XE};Dbq=XE;"), QStringLiteral("ODBC Oracle in XE via local service alias")}
+    };
 
-    if (db.open()) {
-        test = true;
-        qDebug() << "Connexion à la base de données réussie";
-    } else {
-        qDebug() << "Erreur de connexion:" << db.lastError().text();
+    db.setUserName("awss");
+    db.setPassword("123");
+
+    for (const OdbcAttempt &attempt : attempts) {
+        if (db.isOpen()) {
+            db.close();
+        }
+
+        db.setDatabaseName(attempt.databaseName);
+
+        qDebug() << "Tentative de connexion Oracle via ODBC:" << attempt.description;
+        if (db.open()) {
+            qDebug() << "Connexion à la base de données réussie avec" << attempt.description;
+            return true;
+        }
+
+        qDebug() << "Echec de connexion Oracle via ODBC avec" << attempt.description << ":" << db.lastError().text();
     }
 
-    return test;
+    qDebug() << "Drivers disponibles:" << QSqlDatabase::drivers();
+    return false;
 }
 
 // Nouvelle méthode pour la connexion ODBC avec paramètres

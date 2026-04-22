@@ -29,6 +29,7 @@ SOURCES += \
         mainwindow.cpp \
     connection.cpp \
     reception.cpp \
+    extraction.cpp \
     client.cpp \          # AJOUTEZ CETTE LIGNE
     citerne.cpp           # AJOUTEZ CETTE LIGNE
 
@@ -36,6 +37,7 @@ HEADERS += \
         mainwindow.h \
     connection.h \
     reception.h \
+    extraction.h \
     client.h \            # AJOUTEZ CETTE LIGNE
     citerne.h             # AJOUTEZ CETTE LIGNE
 
