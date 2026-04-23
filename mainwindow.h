@@ -3,7 +3,6 @@
 
 #include <QMainWindow>
 #include <QWidget>
-
 #include <QStackedWidget>
 #include <QTabBar>
 #include <QButtonGroup>
@@ -13,39 +12,31 @@
 #include <QTableWidget>
 #include <QStringList>
 #include <QHeaderView>
-
 #include <QVBoxLayout>
 #include <QHBoxLayout>
-#include <QTableWidget>
-#include <QPushButton>
-#include <QLineEdit>
-#include <QLabel>
-#include <QStackedWidget>
 #include <QDialog>
-#include <QHeaderView>
 #include <QFrame>
 #include <QDateEdit>
 #include <QString>
 #include <QList>
-#include <QButtonGroup>
-#include <QTabBar>
 #include <QSqlDatabase>
-
+#include <QTextBrowser>
 class MainWindow : public QMainWindow
 {
     Q_OBJECT
 
 public:
-    explicit MainWindow(QWidget *parent = nullptr);  // Fixed: added 'explicit' and removed duplicate
+    explicit MainWindow(QWidget *parent = nullptr);
     ~MainWindow();
 
 private slots:
-    // Réception slots
+    // ==================== RÉCEPTION - CRUD ====================
     void showAddReceptionDialog();
     void editSelectedReception();
     void deleteSelectedReception();
     void searchReception(const QString &text);
     void refreshReceptionData();
+
 
     // Extraction slots
     void showAddExtractionDialog();
@@ -55,12 +46,36 @@ private slots:
     void refreshExtractionData();
 
     // Navigation slots
+
+    // ==================== RÉCEPTION - STATISTIQUES ====================
+    void showReceptionStatistics();
+    void showPerformanceChart();
+
+    // ==================== RÉCEPTION - TRI ====================
+    void sortReceptionBy(const QString& colonne, Qt::SortOrder order);
+    void onSortById();
+    void onSortByLot();
+    void onSortByDate();
+    void onSortByQuantity();
+
+    // ==================== RÉCEPTION - FILTRAGE ====================
+    void filterReceptionByStatus();
+    void filterReceptionByDate();
+    void filterReceptionByStatusAndDate();
+
+    // ==================== RÉCEPTION - PDF ====================
+    void exportReceptionsToPDF();
+    void exportStatisticsToPDF();
+    void exportFilteredReceptionsToPDF();
+
+    // ==================== NAVIGATION ====================
+
     void switchToClients();
     void switchToCiternes();
     void switchToReception();
     void switchToExtraction();
 
-    // Clients module slots
+    // ==================== CLIENTS ====================
     void showAddClientDialog();
     void editSelectedClient();
     void deleteSelectedClient();
@@ -71,7 +86,7 @@ private slots:
     void showClientComparisonDashboard();
     void showClientRfmMatrix();
 
-    // Citernes module slots (advanced)
+    // ==================== CITERNES ====================
     void showAddCiterneDialog();
     void editSelectedCiterne();
     void deleteSelectedCiterne();
@@ -83,65 +98,101 @@ private slots:
     void exportCiternes();
     void showCiterneStatistics();
 
-    // Quality simulator slots
+    // ==================== QUALITY SIMULATOR ====================
     void openBlendingSimulator();
     void performBlending();
     void calculateBlendingResult();
 
-    // Notification & Alert slots
+    // ==================== NOTIFICATIONS & ALERTS ====================
     void checkLowLevelAlerts();
     void showNotifications();
     void configureThresholds();
     void viewFillingHistory();
 
-    // Predictive maintenance slots
+    // ==================== MAINTENANCE PRÉDICTIVE ====================
     void checkPredictiveAlerts();
     void showEquipmentStatus();
     void detectAnomalies();
 
-    // Navigation between pages
+    // ==================== NAVIGATION PAGES ====================
     void showStatisticsView();
     void showMainListView();
     void showMainCiterneListView();
 
 private:
-    // UI Setup methods
+    // ==================== UI SETUP ====================
     void setupUI();
     void createReceptionPage();
-    QWidget* createHeaderWidget(const QString &title);
     void createClientsPage();
     void createCiternesPage();
     void createExtractionPage();
     void createStatisticsPage();
+
     void createCiterneStatisticsPage();
     // Main layout and sidebar
     QWidget *central = nullptr;
+
+    QWidget* createHeaderWidget(const QString &title);
+
     QWidget* createSideBar();
+    void applyStyles();
+
+    // ==================== DONNÉES EXEMPLES ====================
+    void populateClientsSampleData();
+    void populateCiternesSampleData();
+
+    // ==================== ORACLE ====================
+    bool promptAndTestOracleConnection();
+    void updateDatabaseStatusLabel();
+    bool setupOracleSchema();
+    void loadClientsFromOracle();
+    void loadCiternesFromOracle();
+    QWidget* createClientActionsWidget(int id);
+    QWidget* createCiterneActionsWidget(int id);
+
+    // ==================== HELPERS ====================
+    int findClientRowById(int id);
+    int findCiterneRowById(int id);
+    void updateClientStatistics();
+    QStringList buildCiterneAlerts(double thresholdPercent, int *criticalCount = nullptr, int *warningCount = nullptr, int *normalCount = nullptr) const;
+    QWidget* createProgressWidget(int percent);
+    QWidget* createProgressBar(int percent);
+
+    // ==================== POINTEURS UI ====================
+    QWidget *central = nullptr;
+    QStackedWidget *stackedWidget = nullptr;
+    QTabBar *moduleTabs = nullptr;
     QButtonGroup *navGroup = nullptr;
+
+    // Boutons navigation
     QPushButton *btnClients = nullptr;
     QPushButton *btnCiternes = nullptr;
     QPushButton *btnReception = nullptr;
     QPushButton *btnExtraction = nullptr;
-    QTabBar *moduleTabs = nullptr;
 
-    // Stack and pages
-    QStackedWidget *stackedWidget = nullptr;  // Moved here and initialized
+    // Pages
     QWidget *clientsPage = nullptr;
     QWidget *citernesPage = nullptr;
-    QWidget *receptionPage = nullptr;  // Only declared once now
+    QWidget *receptionPage = nullptr;
     QWidget *extractionPage = nullptr;
     QWidget *statisticsPage = nullptr;
     QWidget *citerneStatisticsPage = nullptr;
 
-    // Réception widgets
+    // ==================== RÉCEPTION WIDGETS ====================
     QTableWidget *receptionTable = nullptr;
     QLineEdit *searchBoxReception = nullptr;
+    void showPredictionDialog();
+    void showProductionPriority();
+
 
     // Extraction widgets
     QTableWidget *extractionTable = nullptr;
     QLineEdit *searchBoxExtraction = nullptr;
 
     // Clients widgets
+
+    // ==================== CLIENTS WIDGETS ====================
+
     QTableWidget *clientsTable = nullptr;
     QLineEdit *searchBox = nullptr;
     QPushButton *addButton = nullptr;
@@ -152,6 +203,8 @@ private:
     QPushButton *exportButton = nullptr;
     QPushButton *statsButton = nullptr;
     QPushButton *backFromStatsButton = nullptr;
+
+    // Statistiques labels
     QLabel *statsTotalClientsValue = nullptr;
     QLabel *statsActiveClientsValue = nullptr;
     QLabel *statsInactiveClientsValue = nullptr;
@@ -164,6 +217,7 @@ private:
     QLabel *statsLegendInactiveValue = nullptr;
     QLabel *statsLegendUndefinedValue = nullptr;
     QLabel *statsLegendOtherValue = nullptr;
+
 
     // Citernes statistics widgets
     QPushButton *backFromCiterneStatsButton = nullptr;
@@ -181,6 +235,9 @@ private:
     QLabel *citerneStatsLegendNormalValue = nullptr;
 
     // Citernes widgets
+
+    // ==================== CITERNES WIDGETS ====================
+
     QTableWidget *citernesTable = nullptr;
     QLineEdit *searchBoxCiternes = nullptr;
     QPushButton *addCiterneBtn = nullptr;
@@ -190,10 +247,11 @@ private:
     QPushButton *blendingBtn = nullptr;
     QPushButton *alertsBtn = nullptr;
 
-    // Quality simulation & Notification data
-    double lowLevelThreshold = 30.0; // Configurable threshold
+    // ==================== DONNÉES ====================
+    double lowLevelThreshold = 30.0;
     QStringList notificationHistory;
     QList<int> qualitySelectedRows;
+
 
     // Styling & data
     void applyStyles();
@@ -219,9 +277,13 @@ private:
     QWidget* createClientActionsWidget(int id);
     QWidget* createCiterneActionsWidget(int id);
 
+
+    // ==================== ORACLE ====================
     QSqlDatabase db;
     QLabel *dbStatusLabel = nullptr;
     bool oracleActive = false;
+    QWidget* createStatsCard(const QString& title, const QString& value, const QString& color);
+
 };
 
 #endif // MAINWINDOW_H

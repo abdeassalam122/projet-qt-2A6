@@ -1,10 +1,13 @@
 #include "mainwindow.h"
 #include "reception.h"
+
 #include "extraction.h"
+
 #include "connection.h"
 #include "client.h"
 #include "citerne.h"
-
+#include <QPainter>//PDF
+#include <QPixmap>//kifkif
 #include <QMessageBox>
 #include <QFormLayout>
 #include <QDate>
@@ -14,6 +17,7 @@
 #include <QInputDialog>
 #include <QVBoxLayout>
 #include <QHBoxLayout>
+#include <QtCharts>
 
 #include <QGridLayout>
 #include <QProgressBar>
@@ -44,7 +48,15 @@
 #include <QComboBox>
 #include <algorithm>
 #include <numeric>
-
+#include <QFileDialog>
+#include <QDesktopServices>
+#include <QDir>
+#include <QComboBox>
+#include <QDateEdit>
+#include <QFormLayout>
+#include <QDialogButtonBox>
+#include <QRegularExpression>
+#include <QRegularExpressionValidator>
 namespace {
 
 QPixmap buildDonutChartPixmap(const QSize &size,
@@ -230,7 +242,46 @@ void MainWindow::createReceptionPage()
     ctrl->addWidget(searchBoxReception);
     ctrl->addStretch();
     contentLay->addLayout(ctrl);
+    QHBoxLayout *extraCtrl = new QHBoxLayout();
 
+    QPushButton *statsBtn = new QPushButton("📊 Statistiques");
+    statsBtn->setProperty("role", "accent");
+    statsBtn->setFixedSize(130,34);
+    connect(statsBtn, &QPushButton::clicked, this, &MainWindow::showReceptionStatistics);
+
+    QPushButton *perfBtn = new QPushButton("📈 Performance");
+    perfBtn->setProperty("role", "secondary");
+    perfBtn->setFixedSize(130,34);
+    connect(perfBtn, &QPushButton::clicked, this, &MainWindow::showPerformanceChart);
+
+    QPushButton *filterBtn = new QPushButton("🔍 Filtrage");
+    filterBtn->setProperty("role", "secondary");
+    filterBtn->setFixedSize(130,34);
+    connect(filterBtn, &QPushButton::clicked, this, &MainWindow::filterReceptionByStatusAndDate);
+
+    QPushButton *pdfBtn = new QPushButton("📄 Exporter PDF");
+    pdfBtn->setProperty("role", "primary");
+    pdfBtn->setFixedSize(140,34);
+    connect(pdfBtn, &QPushButton::clicked, this, &MainWindow::exportReceptionsToPDF);
+
+    QPushButton *predictBtn = new QPushButton("🔮 Prédiction ML");
+    predictBtn->setProperty("role", "accent");
+    predictBtn->setFixedSize(140,34);
+    connect(predictBtn, &QPushButton::clicked, this, &MainWindow::showPredictionDialog);
+
+    QPushButton *priorityBtn = new QPushButton("⏱️ Priorité FIFO");
+    priorityBtn->setProperty("role", "secondary");
+    priorityBtn->setFixedSize(140,34);
+    connect(priorityBtn, &QPushButton::clicked, this, &MainWindow::showProductionPriority);
+    extraCtrl->addWidget(statsBtn);
+    extraCtrl->addWidget(perfBtn);
+    extraCtrl->addWidget(filterBtn);
+    extraCtrl->addWidget(pdfBtn);
+    extraCtrl->addWidget(predictBtn);
+    extraCtrl->addWidget(priorityBtn);
+    extraCtrl->addStretch();
+
+    contentLay->addLayout(extraCtrl);
     // Table Réception
     receptionTable = new QTableWidget();
     receptionTable->setObjectName("receptionTable");
@@ -554,6 +605,47 @@ void MainWindow::createClientsPage()
 
     stackedWidget->addWidget(clientsPage);
 }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+// ============================================================================
+// FONCTIONS D'INTERFACE RÉCEPTION (appellent la classe Reception)
+// ============================================================================
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 // ============================================================================
 // FONCTIONS D'INTERFACE RÉCEPTION (appellent la classe Reception)
 // ============================================================================
@@ -636,9 +728,10 @@ void MainWindow::showAddReceptionDialog()
             return;
         }
 
-        // Appel à la classe Reception
+        // CRÉER UN OBJET Reception
         Reception r(0, lot->text(), qty->value(), qual->text(), client->value(), "REÇU");
 
+        // Appeler la méthode sur l'objet
         if(r.ajouter()) {
             QMessageBox::information(this, "Succès", "Réception ajoutée dans la base");
             refreshReceptionData();
@@ -729,9 +822,10 @@ void MainWindow::editSelectedReception()
         int currentClientId = receptionTable->item(row, 5)->text().toInt();
         QString currentStatus = receptionTable->item(row, 6)->text();
 
-        // Appel à la classe Reception
+        // CRÉER UN OBJET Reception
         Reception r(id, lot->text(), qty->value(), qual->text(), currentClientId, currentStatus);
 
+        // Appeler la méthode sur l'objet
         if(r.modifier()) {
             QMessageBox::information(this, "Succès", "Réception modifiée avec succès");
             refreshReceptionData();
@@ -763,8 +857,11 @@ void MainWindow::deleteSelectedReception()
 
     if(rep == QMessageBox::Yes)
     {
-        // Appel à la classe Reception
-        if(Reception::supprimer(id)) {
+        // CRÉER UN OBJET Reception
+        Reception r;
+
+        // Appeler la méthode sur l'objet
+        if(r.supprimer(id)) {
             QMessageBox::information(this, "Succès", "Réception supprimée avec succès");
             refreshReceptionData();
         } else {
@@ -775,8 +872,17 @@ void MainWindow::deleteSelectedReception()
 
 void MainWindow::searchReception(const QString &text)
 {
+    if(text.isEmpty())
+    {
+        refreshReceptionData();
+        return;
+    }
+
+    // CRÉER UN OBJET Reception
+    Reception r;
+
     // Utilisation de la classe Reception pour la recherche
-    QSqlQueryModel *model = Reception::rechercher(text);
+    QSqlQueryModel *model = r.rechercher(text);
 
     // Mise à jour du tableau avec les résultats
     receptionTable->setRowCount(0);
@@ -797,8 +903,11 @@ void MainWindow::searchReception(const QString &text)
 
 void MainWindow::refreshReceptionData()
 {
+    // CRÉER UN OBJET Reception
+    Reception r;
+
     // Utilisation de la classe Reception pour l'affichage
-    QSqlQueryModel *model = Reception::afficher();
+    QSqlQueryModel *model = r.afficher();
 
     // Mise à jour du tableau
     receptionTable->setRowCount(0);
@@ -816,6 +925,7 @@ void MainWindow::refreshReceptionData()
     qDebug() << "Réceptions chargées depuis la base ✅ -" << model->rowCount() << "lignes";
     delete model;
 }
+
 
 void MainWindow::showAddExtractionDialog()
 {
@@ -1067,6 +1177,810 @@ void MainWindow::refreshExtractionData()
         ++rowIndex;
     }
 }
+
+// ============================================================================
+// FONCTIONS DE STATISTIQUES
+// ============================================================================
+
+
+void MainWindow::showReceptionStatistics()
+{
+    Reception r;
+
+    // Créer un dialogue personnalisé avec graphique
+    QDialog dlg(this);
+    dlg.setWindowTitle("📊 Statistiques des Réceptions");
+    dlg.setMinimumSize(700, 550);
+    dlg.setModal(true);
+
+    QVBoxLayout *mainLayout = new QVBoxLayout(&dlg);
+    mainLayout->setSpacing(15);
+    mainLayout->setContentsMargins(20, 20, 20, 20);
+
+    // Titre
+    QLabel *titleLabel = new QLabel("Statistiques des Réceptions");
+    titleLabel->setStyleSheet("font-size: 18px; font-weight: bold; color: #0D5B52;");
+    titleLabel->setAlignment(Qt::AlignCenter);
+    mainLayout->addWidget(titleLabel);
+
+    // Layout pour les graphiques (côte à côte)
+    QHBoxLayout *chartsLayout = new QHBoxLayout();
+    chartsLayout->setSpacing(20);
+
+    // ==================== GRAPHIQUE 1: CAMEMBERT DES STATUTS ====================
+    QMap<QString, int> stats = r.statistiquesParStatut();
+
+    int total = 0;
+    for(auto it = stats.begin(); it != stats.end(); ++it) {
+        total += it.value();
+    }
+
+    // Widget pour le camembert
+    QWidget *pieWidget = new QWidget();
+    pieWidget->setMinimumSize(250, 250);
+    QVBoxLayout *pieLayout = new QVBoxLayout(pieWidget);
+
+    QLabel *pieTitle = new QLabel("Répartition par Statut");
+    pieTitle->setStyleSheet("font-size: 14px; font-weight: bold; text-align: center;");
+    pieTitle->setAlignment(Qt::AlignCenter);
+    pieLayout->addWidget(pieTitle);
+
+    // Zone de dessin du camembert
+    QLabel *pieChartLabel = new QLabel();
+    pieChartLabel->setFixedSize(220, 220);
+    pieChartLabel->setAlignment(Qt::AlignCenter);
+    pieChartLabel->setStyleSheet("background-color: #FFFFFF; border-radius: 10px;");
+
+    // Dessiner le camembert
+    QPixmap piePix(220, 220);
+    piePix.fill(Qt::white);
+    QPainter painter(&piePix);
+    painter.setRenderHint(QPainter::Antialiasing);
+
+    if(total > 0 && !stats.isEmpty()) {
+        QRectF rect(10, 10, 200, 200);
+
+        QList<QColor> colors = {
+            QColor("#38C86A"),  // Vert - REÇU
+            QColor("#FF7A00"),  // Orange - EN_ATTENTE
+            QColor("#FF3A3A"),  // Rouge - REFUSÉ
+            QColor("#1F9FE0"),  // Bleu - AUTRE
+            QColor("#9B59B6")   // Violet
+        };
+
+        int startAngle = 90 * 16;
+        int colorIndex = 0;
+
+        for(auto it = stats.begin(); it != stats.end(); ++it) {
+            int angle = (it.value() * 360 * 16) / total;
+            if(angle > 0) {
+                painter.setBrush(colors[colorIndex % colors.size()]);
+                painter.setPen(Qt::white);
+                painter.drawPie(rect, startAngle, -angle);
+                startAngle -= angle;
+                colorIndex++;
+            }
+        }
+
+        // Cercle intérieur (effet donut)
+        painter.setBrush(QColor("#F7F9F8"));
+        painter.drawEllipse(rect.center(), 45, 45);
+
+        // Texte au centre
+        painter.setPen(QColor("#0D5B52"));
+        QFont font = painter.font();
+        font.setPointSize(16);
+        font.setBold(true);
+        painter.setFont(font);
+        painter.drawText(rect, Qt::AlignCenter, QString::number(total));
+
+        font.setPointSize(9);
+        painter.setFont(font);
+        painter.drawText(rect.adjusted(0, 20, 0, 0), Qt::AlignCenter, "total");
+    }
+
+    pieChartLabel->setPixmap(piePix);
+    pieLayout->addWidget(pieChartLabel, 0, Qt::AlignCenter);
+
+    // Légende du camembert
+    QWidget *legendWidget = new QWidget();
+    QVBoxLayout *legendLayout = new QVBoxLayout(legendWidget);
+    legendLayout->setSpacing(5);
+
+    QList<QColor> legendColors = {QColor("#38C86A"), QColor("#FF7A00"), QColor("#FF3A3A"), QColor("#1F9FE0")};
+    int legendIndex = 0;
+    for(auto it = stats.begin(); it != stats.end(); ++it) {
+        if(legendIndex < legendColors.size()) {
+            QHBoxLayout *itemLayout = new QHBoxLayout();
+            QLabel *colorBox = new QLabel();
+            colorBox->setFixedSize(12, 12);
+            colorBox->setStyleSheet(QString("background-color: %1; border-radius: 2px;").arg(legendColors[legendIndex].name()));
+            QLabel *textLabel = new QLabel(QString("%1: %2 (%3%)").arg(it.key()).arg(it.value()).arg((it.value() * 100) / total));
+            textLabel->setStyleSheet("font-size: 11px;");
+            itemLayout->addWidget(colorBox);
+            itemLayout->addWidget(textLabel);
+            itemLayout->addStretch();
+            legendLayout->addLayout(itemLayout);
+            legendIndex++;
+        }
+    }
+    legendLayout->addStretch();
+    pieLayout->addWidget(legendWidget);
+
+    chartsLayout->addWidget(pieWidget);
+
+    // ==================== GRAPHIQUE 2: PERFORMANCE MENSUELLE (BARRES) ====================
+    QWidget *barWidget = new QWidget();
+    barWidget->setMinimumSize(350, 250);
+    QVBoxLayout *barLayout = new QVBoxLayout(barWidget);
+
+    QLabel *barTitle = new QLabel("Performance Mensuelle");
+    barTitle->setStyleSheet("font-size: 14px; font-weight: bold; text-align: center;");
+    barTitle->setAlignment(Qt::AlignCenter);
+    barLayout->addWidget(barTitle);
+
+    QSqlQueryModel *model = r.getPerformanceParMois();
+
+    if(model && model->rowCount() > 0) {
+        // Créer un tableau simple pour afficher les données
+        QTableWidget *table = new QTableWidget();
+        table->setRowCount(model->rowCount());
+        table->setColumnCount(3);
+        table->setHorizontalHeaderLabels({"Mois", "Nb Réceptions", "Total (kg)"});
+        table->horizontalHeader()->setSectionResizeMode(QHeaderView::Stretch);
+        table->setAlternatingRowColors(true);
+        table->setStyleSheet("QTableWidget { border: 1px solid #DDD; border-radius: 5px; }");
+
+        for(int i = 0; i < model->rowCount(); i++) {
+            for(int j = 0; j < 3; j++) {
+                table->setItem(i, j, new QTableWidgetItem(model->data(model->index(i, j)).toString()));
+            }
+        }
+
+        barLayout->addWidget(table);
+    } else {
+        QLabel *noData = new QLabel("Aucune donnée disponible");
+        noData->setAlignment(Qt::AlignCenter);
+        barLayout->addWidget(noData);
+    }
+
+    chartsLayout->addWidget(barWidget);
+    mainLayout->addLayout(chartsLayout);
+
+    // ==================== KPI CARDS ====================
+    QHBoxLayout *kpiLayout = new QHBoxLayout();
+    kpiLayout->setSpacing(15);
+
+    Reception::PerformanceStats perfStats = r.getPerformanceStats();
+
+    // Carte Quantité totale
+    QWidget *qtyCard = createStatsCard("📦 Quantité totale", QString::number(perfStats.totalQuantiteKg, 'f', 0) + " kg", "#1F9FE0");
+    // Carte Moyenne
+    QWidget *avgCard = createStatsCard("📊 Moyenne", QString::number(perfStats.moyenneQuantiteParReception, 'f', 1) + " kg", "#38C86A");
+    // Carte Taux réussite
+    QWidget *rateCard = createStatsCard("✅ Taux réussite", QString::number(perfStats.tauxReussite, 'f', 1) + "%", "#FF7A00");
+    // Carte Meilleur mois
+    QWidget *monthCard = createStatsCard("⭐ Meilleur mois", perfStats.meilleurMois.isEmpty() ? "N/A" : perfStats.meilleurMois, "#9B59B6");
+
+    kpiLayout->addWidget(qtyCard);
+    kpiLayout->addWidget(avgCard);
+    kpiLayout->addWidget(rateCard);
+    kpiLayout->addWidget(monthCard);
+    mainLayout->addLayout(kpiLayout);
+
+    // Bouton fermer
+    QPushButton *closeBtn = new QPushButton("Fermer");
+    closeBtn->setFixedSize(120, 35);
+    closeBtn->setStyleSheet("QPushButton { background-color: #0D5B52; color: white; border-radius: 5px; font-weight: bold; }"
+                            "QPushButton:hover { background-color: #0A4B44; }");
+    connect(closeBtn, &QPushButton::clicked, &dlg, &QDialog::accept);
+
+    QHBoxLayout *btnLayout = new QHBoxLayout();
+    btnLayout->addStretch();
+    btnLayout->addWidget(closeBtn);
+    btnLayout->addStretch();
+    mainLayout->addLayout(btnLayout);
+
+    dlg.exec();
+    delete model;
+}
+
+// Helper function to create statistics card
+QWidget* MainWindow::createStatsCard(const QString& title, const QString& value, const QString& color)
+{
+    QWidget *card = new QWidget();
+    card->setFixedSize(150, 80);
+    card->setStyleSheet(QString("background-color: white; border-radius: 10px; border-left: 4px solid %1;").arg(color));
+
+    QVBoxLayout *layout = new QVBoxLayout(card);
+    layout->setContentsMargins(10, 8, 10, 8);
+
+    QLabel *titleLabel = new QLabel(title);
+    titleLabel->setStyleSheet("font-size: 11px; color: #666;");
+    titleLabel->setAlignment(Qt::AlignCenter);
+
+    QLabel *valueLabel = new QLabel(value);
+    valueLabel->setStyleSheet(QString("font-size: 20px; font-weight: bold; color: %1;").arg(color));
+    valueLabel->setAlignment(Qt::AlignCenter);
+
+    layout->addWidget(titleLabel);
+    layout->addWidget(valueLabel);
+
+    return card;
+}
+
+void MainWindow::showPerformanceChart()
+{
+    Reception r;
+
+    QDialog dlg(this);
+    dlg.setWindowTitle("📈 Performance Mensuelle des Réceptions");
+    dlg.setMinimumSize(900, 600);
+    dlg.setModal(true);
+
+    QVBoxLayout *mainLayout = new QVBoxLayout(&dlg);
+    mainLayout->setSpacing(15);
+    mainLayout->setContentsMargins(20, 20, 20, 20);
+
+    // Titre
+    QLabel *titleLabel = new QLabel("Performance Mensuelle");
+    titleLabel->setStyleSheet("font-size: 18px; font-weight: bold; color: #0D5B52;");
+    titleLabel->setAlignment(Qt::AlignCenter);
+    mainLayout->addWidget(titleLabel);
+
+    QSqlQueryModel *model = r.getPerformanceParMois();
+
+    if(model && model->rowCount() > 0) {
+        // Tableau détaillé
+        QTableWidget *table = new QTableWidget();
+        table->setRowCount(model->rowCount());
+        table->setColumnCount(5);
+        table->setHorizontalHeaderLabels({"Mois", "Nb Réceptions", "Total (kg)", "Moyenne (kg)", "Évolution"});
+        table->horizontalHeader()->setSectionResizeMode(QHeaderView::Stretch);
+        table->setAlternatingRowColors(true);
+        table->setStyleSheet("QTableWidget { border: 1px solid #DDD; border-radius: 5px; }"
+                             "QHeaderView::section { background-color: #0D5B52; color: white; font-weight: bold; }");
+
+        int prevTotal = 0;
+        for(int i = 0; i < model->rowCount(); i++) {
+            QString mois = model->data(model->index(i, 0)).toString();
+            QString nbReceptions = model->data(model->index(i, 1)).toString();
+            QString totalKg = model->data(model->index(i, 2)).toString();
+            QString moyenneKg = model->data(model->index(i, 3)).toString();
+
+            table->setItem(i, 0, new QTableWidgetItem(mois));
+            table->setItem(i, 1, new QTableWidgetItem(nbReceptions));
+            table->setItem(i, 2, new QTableWidgetItem(totalKg));
+            table->setItem(i, 3, new QTableWidgetItem(moyenneKg));
+
+            // Calculer l'évolution
+            int currentTotal = nbReceptions.toInt();
+            if(i > 0 && prevTotal > 0) {
+                int evolution = ((currentTotal - prevTotal) * 100) / prevTotal;
+                QString evolText = (evolution >= 0) ? QString("▲ +%1%").arg(evolution) : QString("▼ %1%").arg(evolution);
+                QTableWidgetItem *evolItem = new QTableWidgetItem(evolText);
+                evolItem->setForeground((evolution >= 0) ? QColor(56, 200, 106) : QColor(255, 58, 58));
+                table->setItem(i, 4, evolItem);
+            } else {
+                table->setItem(i, 4, new QTableWidgetItem("-"));
+            }
+            prevTotal = currentTotal;
+        }
+
+        mainLayout->addWidget(table);
+
+        // Totaux
+        QHBoxLayout *totalLayout = new QHBoxLayout();
+        totalLayout->addStretch();
+
+        QLabel *totalLabel = new QLabel(QString("📊 Total général: %1 réceptions").arg(model->rowCount()));
+        totalLabel->setStyleSheet("font-size: 14px; font-weight: bold; color: #0D5B52; padding: 10px;");
+        totalLayout->addWidget(totalLabel);
+
+        totalLayout->addStretch();
+        mainLayout->addLayout(totalLayout);
+
+    } else {
+        QLabel *noData = new QLabel("Aucune donnée de performance disponible");
+        noData->setAlignment(Qt::AlignCenter);
+        noData->setStyleSheet("font-size: 14px; color: #999; padding: 50px;");
+        mainLayout->addWidget(noData);
+    }
+
+    // Bouton fermer
+    QPushButton *closeBtn = new QPushButton("Fermer");
+    closeBtn->setFixedSize(120, 35);
+    closeBtn->setStyleSheet("QPushButton { background-color: #0D5B52; color: white; border-radius: 5px; font-weight: bold; }"
+                            "QPushButton:hover { background-color: #0A4B44; }");
+    connect(closeBtn, &QPushButton::clicked, &dlg, &QDialog::accept);
+
+    QHBoxLayout *btnLayout = new QHBoxLayout();
+    btnLayout->addStretch();
+    btnLayout->addWidget(closeBtn);
+    btnLayout->addStretch();
+    mainLayout->addLayout(btnLayout);
+
+    dlg.exec();
+    delete model;
+}
+
+// ============================================================================
+// FONCTIONS DE TRI
+// ============================================================================
+
+void MainWindow::sortReceptionBy(const QString& colonne, Qt::SortOrder order)
+{
+    Reception r;
+    QSqlQueryModel *model = r.trierPar(colonne, order);
+
+    if(model) {
+        receptionTable->setRowCount(0);
+
+        for(int i = 0; i < model->rowCount(); i++) {
+            receptionTable->insertRow(i);
+            for(int j = 0; j < 7; j++) {
+                QTableWidgetItem *item = new QTableWidgetItem(model->data(model->index(i, j)).toString());
+                receptionTable->setItem(i, j, item);
+            }
+        }
+        delete model;
+    }
+}
+
+void MainWindow::onSortById()
+{
+    sortReceptionBy("id", Qt::AscendingOrder);
+    QMessageBox::information(this, "Tri", "Tri par ID effectué");
+}
+
+void MainWindow::onSortByLot()
+{
+    sortReceptionBy("lot", Qt::AscendingOrder);
+    QMessageBox::information(this, "Tri", "Tri par Lot effectué");
+}
+
+void MainWindow::onSortByDate()
+{
+    sortReceptionBy("date", Qt::DescendingOrder);
+    QMessageBox::information(this, "Tri", "Tri par Date effectué");
+}
+
+void MainWindow::onSortByQuantity()
+{
+    sortReceptionBy("quantite", Qt::DescendingOrder);
+    QMessageBox::information(this, "Tri", "Tri par Quantité effectué");
+}
+
+// ============================================================================
+// FONCTIONS DE FILTRAGE
+// ============================================================================
+
+void MainWindow::filterReceptionByStatus()
+{
+    QDialog dlg(this);
+    dlg.setWindowTitle("Filtrer par Statut");
+    dlg.setMinimumSize(300, 150);
+
+    QVBoxLayout *layout = new QVBoxLayout(&dlg);
+
+    QLabel *label = new QLabel("Sélectionnez un statut :");
+    layout->addWidget(label);
+
+    QComboBox *statusCombo = new QComboBox();
+    statusCombo->addItems({"", "REÇU", "EN_ATTENTE", "REFUSÉ", "EN_COURS"});
+    layout->addWidget(statusCombo);
+
+    QHBoxLayout *btnLayout = new QHBoxLayout();
+    QPushButton *filterBtn = new QPushButton("Filtrer");
+    QPushButton *cancelBtn = new QPushButton("Annuler");
+    btnLayout->addWidget(filterBtn);
+    btnLayout->addWidget(cancelBtn);
+    layout->addLayout(btnLayout);
+
+    connect(filterBtn, &QPushButton::clicked, &dlg, [&]() {
+        QString status = statusCombo->currentText();
+        if(!status.isEmpty()) {
+            Reception r;
+            QSqlQueryModel *model = r.filtrerParStatut(status);
+
+            if(model) {
+                receptionTable->setRowCount(0);
+                for(int i = 0; i < model->rowCount(); i++) {
+                    receptionTable->insertRow(i);
+                    for(int j = 0; j < 7; j++) {
+                        QTableWidgetItem *item = new QTableWidgetItem(model->data(model->index(i, j)).toString());
+                        receptionTable->setItem(i, j, item);
+                    }
+                }
+                delete model;
+                QMessageBox::information(this, "Filtrage", QString("%1 réception(s) trouvée(s)").arg(receptionTable->rowCount()));
+            }
+        }
+        dlg.accept();
+    });
+
+    connect(cancelBtn, &QPushButton::clicked, &dlg, &QDialog::reject);
+
+    dlg.exec();
+}
+
+void MainWindow::filterReceptionByDate()
+{
+    QDialog dlg(this);
+    dlg.setWindowTitle("Filtrer par Période");
+    dlg.setMinimumSize(350, 200);
+
+    QVBoxLayout *layout = new QVBoxLayout(&dlg);
+
+    QLabel *label1 = new QLabel("Date début :");
+    QDateEdit *dateDebut = new QDateEdit(QDate::currentDate());
+    dateDebut->setCalendarPopup(true);
+    dateDebut->setDisplayFormat("dd/MM/yyyy");
+
+    QLabel *label2 = new QLabel("Date fin :");
+    QDateEdit *dateFin = new QDateEdit(QDate::currentDate());
+    dateFin->setCalendarPopup(true);
+    dateFin->setDisplayFormat("dd/MM/yyyy");
+
+    layout->addWidget(label1);
+    layout->addWidget(dateDebut);
+    layout->addWidget(label2);
+    layout->addWidget(dateFin);
+
+    QHBoxLayout *btnLayout = new QHBoxLayout();
+    QPushButton *filterBtn = new QPushButton("Filtrer");
+    QPushButton *cancelBtn = new QPushButton("Annuler");
+    btnLayout->addWidget(filterBtn);
+    btnLayout->addWidget(cancelBtn);
+    layout->addLayout(btnLayout);
+
+    connect(filterBtn, &QPushButton::clicked, &dlg, [&]() {
+        Reception r;
+        QSqlQueryModel *model = r.filtrerParDate(
+            dateDebut->date().toString("dd/MM/yyyy"),
+            dateFin->date().toString("dd/MM/yyyy")
+            );
+
+        if(model) {
+            receptionTable->setRowCount(0);
+            for(int i = 0; i < model->rowCount(); i++) {
+                receptionTable->insertRow(i);
+                for(int j = 0; j < 7; j++) {
+                    QTableWidgetItem *item = new QTableWidgetItem(model->data(model->index(i, j)).toString());
+                    receptionTable->setItem(i, j, item);
+                }
+            }
+            delete model;
+            QMessageBox::information(this, "Filtrage", QString("%1 réception(s) trouvée(s)").arg(receptionTable->rowCount()));
+        }
+        dlg.accept();
+    });
+
+    connect(cancelBtn, &QPushButton::clicked, &dlg, &QDialog::reject);
+
+    dlg.exec();
+}
+
+void MainWindow::filterReceptionByStatusAndDate()
+{
+    QDialog dlg(this);
+    dlg.setWindowTitle("Filtrage Avancé");
+    dlg.setMinimumSize(400, 250);
+
+    QVBoxLayout *layout = new QVBoxLayout(&dlg);
+
+    QLabel *labelStatus = new QLabel("Statut :");
+    QComboBox *statusCombo = new QComboBox();
+    statusCombo->addItems({"", "REÇU", "EN_ATTENTE", "REFUSÉ", "EN_COURS"});
+
+    QLabel *labelDebut = new QLabel("Date début :");
+    QDateEdit *dateDebut = new QDateEdit(QDate::currentDate());
+    dateDebut->setCalendarPopup(true);
+    dateDebut->setDisplayFormat("dd/MM/yyyy");
+
+    QLabel *labelFin = new QLabel("Date fin :");
+    QDateEdit *dateFin = new QDateEdit(QDate::currentDate());
+    dateFin->setCalendarPopup(true);
+    dateFin->setDisplayFormat("dd/MM/yyyy");
+
+    layout->addWidget(labelStatus);
+    layout->addWidget(statusCombo);
+    layout->addWidget(labelDebut);
+    layout->addWidget(dateDebut);
+    layout->addWidget(labelFin);
+    layout->addWidget(dateFin);
+
+    QHBoxLayout *btnLayout = new QHBoxLayout();
+    QPushButton *filterBtn = new QPushButton("Filtrer");
+    QPushButton *cancelBtn = new QPushButton("Annuler");
+    QPushButton *resetBtn = new QPushButton("Réinitialiser");
+    btnLayout->addWidget(filterBtn);
+    btnLayout->addWidget(resetBtn);
+    btnLayout->addWidget(cancelBtn);
+    layout->addLayout(btnLayout);
+
+    connect(filterBtn, &QPushButton::clicked, &dlg, [&]() {
+        Reception r;
+        QSqlQueryModel *model = r.filtrerParStatutEtDate(
+            statusCombo->currentText(),
+            dateDebut->date().toString("dd/MM/yyyy"),
+            dateFin->date().toString("dd/MM/yyyy")
+            );
+
+        if(model) {
+            receptionTable->setRowCount(0);
+            for(int i = 0; i < model->rowCount(); i++) {
+                receptionTable->insertRow(i);
+                for(int j = 0; j < 7; j++) {
+                    QTableWidgetItem *item = new QTableWidgetItem(model->data(model->index(i, j)).toString());
+                    receptionTable->setItem(i, j, item);
+                }
+            }
+            delete model;
+            QMessageBox::information(this, "Filtrage", QString("%1 réception(s) trouvée(s)").arg(receptionTable->rowCount()));
+        }
+        dlg.accept();
+    });
+
+    connect(resetBtn, &QPushButton::clicked, &dlg, [&]() {
+        refreshReceptionData();
+        dlg.accept();
+    });
+
+    connect(cancelBtn, &QPushButton::clicked, &dlg, &QDialog::reject);
+
+    dlg.exec();
+}
+
+// ============================================================================
+// FONCTIONS PDF
+// ============================================================================
+
+void MainWindow::exportReceptionsToPDF()
+{
+    QString chemin = QFileDialog::getSaveFileName(this,
+                                                  "Enregistrer le PDF",
+                                                  QDir::homePath() + "/rapport_receptions.pdf",
+                                                  "PDF Files (*.pdf)");
+
+    if(!chemin.isEmpty())
+    {
+        Reception r;
+        if(r.exporterPDF(chemin)) {
+            QMessageBox::information(this, "Succès", "PDF généré avec succès !");
+            QDesktopServices::openUrl(QUrl::fromLocalFile(chemin));
+        } else {
+            QMessageBox::critical(this, "Erreur", "Erreur lors de la génération du PDF");
+        }
+    }
+}
+
+void MainWindow::exportStatisticsToPDF()
+{
+    QString chemin = QFileDialog::getSaveFileName(this,
+                                                  "Enregistrer les statistiques",
+                                                  QDir::homePath() + "/statistiques_receptions.pdf",
+                                                  "PDF Files (*.pdf)");
+
+    if(!chemin.isEmpty())
+    {
+        Reception r;
+        if(r.exporterStatistiquesPDF(chemin)) {
+            QMessageBox::information(this, "Succès", "Statistiques exportées avec succès !");
+            QDesktopServices::openUrl(QUrl::fromLocalFile(chemin));
+        } else {
+            QMessageBox::critical(this, "Erreur", "Erreur lors de l'export des statistiques");
+        }
+    }
+}
+
+void MainWindow::exportFilteredReceptionsToPDF()
+{
+    // Récupérer les réceptions actuelles du tableau
+    QSqlQueryModel *model = new QSqlQueryModel();
+    model->setQuery("SELECT id, lot_number, TO_CHAR(received_at, 'DD/MM/YYYY'), "
+                    "quantity_kg, quality_grade, client_id, status "
+                    "FROM reception ORDER BY id DESC");
+
+    QString chemin = QFileDialog::getSaveFileName(this,
+                                                  "Enregistrer les réceptions filtrées",
+                                                  QDir::homePath() + "/receptions_filtrees.pdf",
+                                                  "PDF Files (*.pdf)");
+
+    if(!chemin.isEmpty())
+    {
+        Reception r;
+        if(r.exporterReceptionsPDF(chemin, model)) {
+            QMessageBox::information(this, "Succès", "PDF des réceptions généré !");
+            QDesktopServices::openUrl(QUrl::fromLocalFile(chemin));
+        } else {
+            QMessageBox::critical(this, "Erreur", "Erreur lors de la génération du PDF");
+        }
+    }
+    delete model;
+}
+
+void MainWindow::showPredictionDialog()
+{
+    int row = receptionTable->currentRow();
+    if (row < 0) {
+        QMessageBox::warning(this, "Attention", "Sélectionnez une réception pour la prédiction.");
+        return;
+    }
+
+    int id = receptionTable->item(row, 0)->text().toInt();
+    QString lot = receptionTable->item(row, 1)->text();
+    float quantite = receptionTable->item(row, 3)->text().toFloat();
+    QString qualite = receptionTable->item(row, 4)->text();
+
+    Reception r;
+    Reception::RendementPrediction pred = r.predireProductionHuile(id);
+
+    QDialog dlg(this);
+    dlg.setWindowTitle("🔮 Prédiction Production d'Huile - ML");
+    dlg.setMinimumSize(500, 420);
+
+    QVBoxLayout *layout = new QVBoxLayout(&dlg);
+
+    QString html = QString(
+                       "<div style='text-align: center;'>"
+                       "<h2 style='color: #0D5B52;'>📊 Prédiction ML</h2>"
+                       "<hr>"
+                       "<table style='width: 100%; margin: 20px 0;'>"
+                       "<tr><td><b>Lot:</b></td><td>%1</td></tr>"
+                       "<tr><td><b>Qualité olives:</b></td><td>%2</td></tr>"
+                       "<tr><td><b>Quantité olives:</b></td><td>%3 kg</td></tr>"
+                       "<tr><td colspan='2'><hr></td></tr>"
+                       "<tr><td><b>📈 Rendement prédit:</b></td><td style='color:#38C86A; font-size:18px;'>%4%</td></tr>"
+                       "<tr><td><b>🫒 Huile produite:</b></td><td style='color:#FF7A00; font-size:18px;'>%5 litres</td></tr>"
+                       "<tr><td><b>🎯 Niveau confiance:</b></td><td>%6%</td></tr>"
+                       "<tr><td><b>🧠 Méthode:</b></td><td>%7</td></tr>"
+                       "<tr><td colspan='2'><hr></td></tr>"
+                       "<tr><td colspan='2'><i>⚠️ Marge d'erreur estimée: ±%8%</i></td></tr>"
+                       "</table>"
+                       "</div>"
+                       ).arg(lot, qualite)
+                       .arg(quantite, 0, 'f', 2)
+                       .arg(pred.rendementPredicted, 0, 'f', 2)
+                       .arg(pred.huileProduiteLitres, 0, 'f', 2)
+                       .arg(pred.confiance, 0, 'f', 2)
+                       .arg(pred.methode)
+                       .arg((100 - pred.confiance) * 0.6f, 0, 'f', 1);
+
+    QTextBrowser *browser = new QTextBrowser();
+    browser->setHtml(html);
+    browser->setMinimumHeight(320);
+    layout->addWidget(browser);
+
+    QDialogButtonBox *box = new QDialogButtonBox(QDialogButtonBox::Ok);
+    connect(box, &QDialogButtonBox::accepted, &dlg, &QDialog::accept);
+    layout->addWidget(box);
+
+    dlg.exec();
+}
+
+void MainWindow::showProductionPriority()
+{
+    Reception r;
+    QList<Reception::PrioriteProduction> fileAttente = r.getPrioriteProductionFIFO();
+
+    if (fileAttente.isEmpty()) {
+        QMessageBox::information(this, "Priorité Production", "Aucune réception en attente de production.");
+        return;
+    }
+
+    QDialog dlg(this);
+    dlg.setWindowTitle("⏱️ Priorité Production - FIFO (Premier arrivé, premier produit)");
+    dlg.setMinimumSize(750, 500);
+
+    QVBoxLayout *layout = new QVBoxLayout(&dlg);
+
+    QLabel *title = new QLabel("<h2>📋 File d'attente production</h2>");
+    title->setAlignment(Qt::AlignCenter);
+    layout->addWidget(title);
+
+    QLabel *info = new QLabel(QString("<b>Total lots en attente:</b> %1").arg(fileAttente.size()));
+    info->setStyleSheet("color: #0D5B52; font-size: 14px;");
+    layout->addWidget(info);
+
+    QTableWidget *table = new QTableWidget();
+    table->setColumnCount(6);
+    table->setHorizontalHeaderLabels({"Ordre", "Lot", "Date réception", "Quantité (kg)", "Qualité", "Recommandation"});
+    table->setRowCount(fileAttente.size());
+    table->horizontalHeader()->setSectionResizeMode(QHeaderView::Stretch);
+    table->setAlternatingRowColors(true);
+
+    for (int i = 0; i < fileAttente.size(); i++) {
+        const Reception::PrioriteProduction &p = fileAttente[i];
+
+        table->setItem(i, 0, new QTableWidgetItem(QString::number(p.ordreProduction)));
+        table->setItem(i, 1, new QTableWidgetItem(p.lotNumber));
+        table->setItem(i, 2, new QTableWidgetItem(p.dateReception));
+        table->setItem(i, 3, new QTableWidgetItem(QString::number(p.quantiteKg, 'f', 2)));
+        table->setItem(i, 4, new QTableWidgetItem(p.qualite));
+
+        QString recommandation;
+        QColor color;
+        if (p.ordreProduction == 1) {
+            recommandation = "🔴 PRODUIRE IMMÉDIATEMENT";
+            color = QColor(255, 58, 58);
+        } else if (p.ordreProduction <= 3) {
+            recommandation = "🟠 Programmer sous 24h";
+            color = QColor(255, 122, 0);
+        } else if (p.ordreProduction <= 6) {
+            recommandation = "🟡 Planifier cette semaine";
+            color = QColor(255, 193, 7);
+        } else {
+            recommandation = "🟢 En attente";
+            color = QColor(56, 200, 106);
+        }
+
+        QTableWidgetItem *recItem = new QTableWidgetItem(recommandation);
+        recItem->setForeground(color);
+        table->setItem(i, 5, recItem);
+
+        // Mettre en évidence la première ligne
+        if (p.ordreProduction == 1) {
+            for (int j = 0; j < 6; j++) {
+                if (table->item(i, j)) {
+                    table->item(i, j)->setBackground(QColor(255, 240, 240));
+                }
+            }
+        }
+    }
+
+    layout->addWidget(table);
+
+    // Bouton pour rafraîchir
+    QHBoxLayout *btnLayout = new QHBoxLayout();
+    QPushButton *refreshBtn = new QPushButton("🔄 Rafraîchir");
+    QPushButton *closeBtn = new QPushButton("Fermer");
+    btnLayout->addStretch();
+    btnLayout->addWidget(refreshBtn);
+    btnLayout->addWidget(closeBtn);
+    layout->addLayout(btnLayout);
+
+    connect(refreshBtn, &QPushButton::clicked, &dlg, [&]() {
+        dlg.close();
+        showProductionPriority();
+    });
+    connect(closeBtn, &QPushButton::clicked, &dlg, &QDialog::accept);
+
+    dlg.exec();
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+// ============================================================================
+// AJOUTER LES BOUTONS DANS createReceptionPage()
+// ============================================================================
+
+// Dans createReceptionPage(), ajoutez ces boutons après les autres :
+
+
+
+
+
+
+>>>>>>> 88b7248 (metiers simples et avances)
 // ============================================================================
 // CITERNE PAGE - reuse simple table + actions (you can expand later)
 // ============================================================================
@@ -1128,6 +2042,9 @@ void MainWindow::createCiternesPage()
     advCtrl->addWidget(statsCiterneBtn);
     advCtrl->addStretch();
     contentLay->addLayout(advCtrl);
+    // À ajouter après les autres boutons dans createReceptionPage()
+
+
 
     // Table for citernes
     citernesTable = new QTableWidget();
