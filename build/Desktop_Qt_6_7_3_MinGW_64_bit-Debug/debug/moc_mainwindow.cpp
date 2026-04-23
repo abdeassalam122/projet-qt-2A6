@@ -44,6 +44,22 @@ constexpr auto qt_meta_stringdata_CLASSMainWindowENDCLASS = QtMocHelpers::string
     "searchReception",
     "text",
     "refreshReceptionData",
+    "showReceptionStatistics",
+    "showPerformanceChart",
+    "sortReceptionBy",
+    "colonne",
+    "Qt::SortOrder",
+    "order",
+    "onSortById",
+    "onSortByLot",
+    "onSortByDate",
+    "onSortByQuantity",
+    "filterReceptionByStatus",
+    "filterReceptionByDate",
+    "filterReceptionByStatusAndDate",
+    "exportReceptionsToPDF",
+    "exportStatisticsToPDF",
+    "exportFilteredReceptionsToPDF",
     "switchToClients",
     "switchToCiternes",
     "switchToReception",
@@ -88,7 +104,7 @@ Q_CONSTINIT static const uint qt_meta_data_CLASSMainWindowENDCLASS[] = {
       12,       // revision
        0,       // classname
        0,    0, // classinfo
-      37,   14, // methods
+      50,   14, // methods
        0,    0, // properties
        0,    0, // enums/sets
        0,    0, // constructors
@@ -96,49 +112,75 @@ Q_CONSTINIT static const uint qt_meta_data_CLASSMainWindowENDCLASS[] = {
        0,       // signalCount
 
  // slots: name, argc, parameters, tag, flags, initial metatype offsets
-       1,    0,  236,    2, 0x08,    1 /* Private */,
-       3,    0,  237,    2, 0x08,    2 /* Private */,
-       4,    0,  238,    2, 0x08,    3 /* Private */,
-       5,    1,  239,    2, 0x08,    4 /* Private */,
-       7,    0,  242,    2, 0x08,    6 /* Private */,
-       8,    0,  243,    2, 0x08,    7 /* Private */,
-       9,    0,  244,    2, 0x08,    8 /* Private */,
-      10,    0,  245,    2, 0x08,    9 /* Private */,
-      11,    0,  246,    2, 0x08,   10 /* Private */,
-      12,    0,  247,    2, 0x08,   11 /* Private */,
-      13,    0,  248,    2, 0x08,   12 /* Private */,
-      14,    0,  249,    2, 0x08,   13 /* Private */,
-      15,    0,  250,    2, 0x08,   14 /* Private */,
-      16,    0,  251,    2, 0x08,   15 /* Private */,
-      17,    0,  252,    2, 0x08,   16 /* Private */,
-      18,    1,  253,    2, 0x08,   17 /* Private */,
-      19,    0,  256,    2, 0x08,   19 /* Private */,
-      20,    0,  257,    2, 0x08,   20 /* Private */,
-      21,    0,  258,    2, 0x08,   21 /* Private */,
-      22,    0,  259,    2, 0x08,   22 /* Private */,
-      23,    0,  260,    2, 0x08,   23 /* Private */,
-      24,    0,  261,    2, 0x08,   24 /* Private */,
-      25,    1,  262,    2, 0x08,   25 /* Private */,
-      26,    0,  265,    2, 0x08,   27 /* Private */,
-      27,    0,  266,    2, 0x08,   28 /* Private */,
-      28,    0,  267,    2, 0x08,   29 /* Private */,
-      29,    0,  268,    2, 0x08,   30 /* Private */,
-      30,    0,  269,    2, 0x08,   31 /* Private */,
-      31,    0,  270,    2, 0x08,   32 /* Private */,
-      32,    0,  271,    2, 0x08,   33 /* Private */,
-      33,    0,  272,    2, 0x08,   34 /* Private */,
-      34,    0,  273,    2, 0x08,   35 /* Private */,
-      35,    0,  274,    2, 0x08,   36 /* Private */,
-      36,    0,  275,    2, 0x08,   37 /* Private */,
-      37,    0,  276,    2, 0x08,   38 /* Private */,
-      38,    0,  277,    2, 0x08,   39 /* Private */,
-      39,    0,  278,    2, 0x08,   40 /* Private */,
+       1,    0,  314,    2, 0x08,    1 /* Private */,
+       3,    0,  315,    2, 0x08,    2 /* Private */,
+       4,    0,  316,    2, 0x08,    3 /* Private */,
+       5,    1,  317,    2, 0x08,    4 /* Private */,
+       7,    0,  320,    2, 0x08,    6 /* Private */,
+       8,    0,  321,    2, 0x08,    7 /* Private */,
+       9,    0,  322,    2, 0x08,    8 /* Private */,
+      10,    2,  323,    2, 0x08,    9 /* Private */,
+      14,    0,  328,    2, 0x08,   12 /* Private */,
+      15,    0,  329,    2, 0x08,   13 /* Private */,
+      16,    0,  330,    2, 0x08,   14 /* Private */,
+      17,    0,  331,    2, 0x08,   15 /* Private */,
+      18,    0,  332,    2, 0x08,   16 /* Private */,
+      19,    0,  333,    2, 0x08,   17 /* Private */,
+      20,    0,  334,    2, 0x08,   18 /* Private */,
+      21,    0,  335,    2, 0x08,   19 /* Private */,
+      22,    0,  336,    2, 0x08,   20 /* Private */,
+      23,    0,  337,    2, 0x08,   21 /* Private */,
+      24,    0,  338,    2, 0x08,   22 /* Private */,
+      25,    0,  339,    2, 0x08,   23 /* Private */,
+      26,    0,  340,    2, 0x08,   24 /* Private */,
+      27,    0,  341,    2, 0x08,   25 /* Private */,
+      28,    0,  342,    2, 0x08,   26 /* Private */,
+      29,    0,  343,    2, 0x08,   27 /* Private */,
+      30,    0,  344,    2, 0x08,   28 /* Private */,
+      31,    0,  345,    2, 0x08,   29 /* Private */,
+      32,    0,  346,    2, 0x08,   30 /* Private */,
+      33,    0,  347,    2, 0x08,   31 /* Private */,
+      34,    1,  348,    2, 0x08,   32 /* Private */,
+      35,    0,  351,    2, 0x08,   34 /* Private */,
+      36,    0,  352,    2, 0x08,   35 /* Private */,
+      37,    0,  353,    2, 0x08,   36 /* Private */,
+      38,    0,  354,    2, 0x08,   37 /* Private */,
+      39,    0,  355,    2, 0x08,   38 /* Private */,
+      40,    0,  356,    2, 0x08,   39 /* Private */,
+      41,    1,  357,    2, 0x08,   40 /* Private */,
+      42,    0,  360,    2, 0x08,   42 /* Private */,
+      43,    0,  361,    2, 0x08,   43 /* Private */,
+      44,    0,  362,    2, 0x08,   44 /* Private */,
+      45,    0,  363,    2, 0x08,   45 /* Private */,
+      46,    0,  364,    2, 0x08,   46 /* Private */,
+      47,    0,  365,    2, 0x08,   47 /* Private */,
+      48,    0,  366,    2, 0x08,   48 /* Private */,
+      49,    0,  367,    2, 0x08,   49 /* Private */,
+      50,    0,  368,    2, 0x08,   50 /* Private */,
+      51,    0,  369,    2, 0x08,   51 /* Private */,
+      52,    0,  370,    2, 0x08,   52 /* Private */,
+      53,    0,  371,    2, 0x08,   53 /* Private */,
+      54,    0,  372,    2, 0x08,   54 /* Private */,
+      55,    0,  373,    2, 0x08,   55 /* Private */,
 
  // slots: parameters
     QMetaType::Void,
     QMetaType::Void,
     QMetaType::Void,
     QMetaType::Void, QMetaType::QString,    6,
+    QMetaType::Void,
+    QMetaType::Void,
+    QMetaType::Void,
+    QMetaType::Void, QMetaType::QString, 0x80000000 | 12,   11,   13,
+    QMetaType::Void,
+    QMetaType::Void,
+    QMetaType::Void,
+    QMetaType::Void,
+    QMetaType::Void,
+    QMetaType::Void,
+    QMetaType::Void,
+    QMetaType::Void,
+    QMetaType::Void,
     QMetaType::Void,
     QMetaType::Void,
     QMetaType::Void,
@@ -195,6 +237,34 @@ Q_CONSTINIT const QMetaObject MainWindow::staticMetaObject = { {
         QtPrivate::TypeAndForceComplete<void, std::false_type>,
         QtPrivate::TypeAndForceComplete<const QString &, std::false_type>,
         // method 'refreshReceptionData'
+        QtPrivate::TypeAndForceComplete<void, std::false_type>,
+        // method 'showReceptionStatistics'
+        QtPrivate::TypeAndForceComplete<void, std::false_type>,
+        // method 'showPerformanceChart'
+        QtPrivate::TypeAndForceComplete<void, std::false_type>,
+        // method 'sortReceptionBy'
+        QtPrivate::TypeAndForceComplete<void, std::false_type>,
+        QtPrivate::TypeAndForceComplete<const QString &, std::false_type>,
+        QtPrivate::TypeAndForceComplete<Qt::SortOrder, std::false_type>,
+        // method 'onSortById'
+        QtPrivate::TypeAndForceComplete<void, std::false_type>,
+        // method 'onSortByLot'
+        QtPrivate::TypeAndForceComplete<void, std::false_type>,
+        // method 'onSortByDate'
+        QtPrivate::TypeAndForceComplete<void, std::false_type>,
+        // method 'onSortByQuantity'
+        QtPrivate::TypeAndForceComplete<void, std::false_type>,
+        // method 'filterReceptionByStatus'
+        QtPrivate::TypeAndForceComplete<void, std::false_type>,
+        // method 'filterReceptionByDate'
+        QtPrivate::TypeAndForceComplete<void, std::false_type>,
+        // method 'filterReceptionByStatusAndDate'
+        QtPrivate::TypeAndForceComplete<void, std::false_type>,
+        // method 'exportReceptionsToPDF'
+        QtPrivate::TypeAndForceComplete<void, std::false_type>,
+        // method 'exportStatisticsToPDF'
+        QtPrivate::TypeAndForceComplete<void, std::false_type>,
+        // method 'exportFilteredReceptionsToPDF'
         QtPrivate::TypeAndForceComplete<void, std::false_type>,
         // method 'switchToClients'
         QtPrivate::TypeAndForceComplete<void, std::false_type>,
@@ -277,38 +347,51 @@ void MainWindow::qt_static_metacall(QObject *_o, QMetaObject::Call _c, int _id, 
         case 2: _t->deleteSelectedReception(); break;
         case 3: _t->searchReception((*reinterpret_cast< std::add_pointer_t<QString>>(_a[1]))); break;
         case 4: _t->refreshReceptionData(); break;
-        case 5: _t->switchToClients(); break;
-        case 6: _t->switchToCiternes(); break;
-        case 7: _t->switchToReception(); break;
-        case 8: _t->switchToExtraction(); break;
-        case 9: _t->showAddClientDialog(); break;
-        case 10: _t->editSelectedClient(); break;
-        case 11: _t->deleteSelectedClient(); break;
-        case 12: _t->viewSelectedClient(); break;
-        case 13: _t->sortClients(); break;
-        case 14: _t->exportClients(); break;
-        case 15: _t->searchClients((*reinterpret_cast< std::add_pointer_t<QString>>(_a[1]))); break;
-        case 16: _t->showAddCiterneDialog(); break;
-        case 17: _t->editSelectedCiterne(); break;
-        case 18: _t->deleteSelectedCiterne(); break;
-        case 19: _t->viewCiterneDetails(); break;
-        case 20: _t->onFillButtonClicked(); break;
-        case 21: _t->onDrainButtonClicked(); break;
-        case 22: _t->searchCiternes((*reinterpret_cast< std::add_pointer_t<QString>>(_a[1]))); break;
-        case 23: _t->sortCiternes(); break;
-        case 24: _t->exportCiternes(); break;
-        case 25: _t->openBlendingSimulator(); break;
-        case 26: _t->performBlending(); break;
-        case 27: _t->calculateBlendingResult(); break;
-        case 28: _t->checkLowLevelAlerts(); break;
-        case 29: _t->showNotifications(); break;
-        case 30: _t->configureThresholds(); break;
-        case 31: _t->viewFillingHistory(); break;
-        case 32: _t->checkPredictiveAlerts(); break;
-        case 33: _t->showEquipmentStatus(); break;
-        case 34: _t->detectAnomalies(); break;
-        case 35: _t->showStatisticsView(); break;
-        case 36: _t->showMainListView(); break;
+        case 5: _t->showReceptionStatistics(); break;
+        case 6: _t->showPerformanceChart(); break;
+        case 7: _t->sortReceptionBy((*reinterpret_cast< std::add_pointer_t<QString>>(_a[1])),(*reinterpret_cast< std::add_pointer_t<Qt::SortOrder>>(_a[2]))); break;
+        case 8: _t->onSortById(); break;
+        case 9: _t->onSortByLot(); break;
+        case 10: _t->onSortByDate(); break;
+        case 11: _t->onSortByQuantity(); break;
+        case 12: _t->filterReceptionByStatus(); break;
+        case 13: _t->filterReceptionByDate(); break;
+        case 14: _t->filterReceptionByStatusAndDate(); break;
+        case 15: _t->exportReceptionsToPDF(); break;
+        case 16: _t->exportStatisticsToPDF(); break;
+        case 17: _t->exportFilteredReceptionsToPDF(); break;
+        case 18: _t->switchToClients(); break;
+        case 19: _t->switchToCiternes(); break;
+        case 20: _t->switchToReception(); break;
+        case 21: _t->switchToExtraction(); break;
+        case 22: _t->showAddClientDialog(); break;
+        case 23: _t->editSelectedClient(); break;
+        case 24: _t->deleteSelectedClient(); break;
+        case 25: _t->viewSelectedClient(); break;
+        case 26: _t->sortClients(); break;
+        case 27: _t->exportClients(); break;
+        case 28: _t->searchClients((*reinterpret_cast< std::add_pointer_t<QString>>(_a[1]))); break;
+        case 29: _t->showAddCiterneDialog(); break;
+        case 30: _t->editSelectedCiterne(); break;
+        case 31: _t->deleteSelectedCiterne(); break;
+        case 32: _t->viewCiterneDetails(); break;
+        case 33: _t->onFillButtonClicked(); break;
+        case 34: _t->onDrainButtonClicked(); break;
+        case 35: _t->searchCiternes((*reinterpret_cast< std::add_pointer_t<QString>>(_a[1]))); break;
+        case 36: _t->sortCiternes(); break;
+        case 37: _t->exportCiternes(); break;
+        case 38: _t->openBlendingSimulator(); break;
+        case 39: _t->performBlending(); break;
+        case 40: _t->calculateBlendingResult(); break;
+        case 41: _t->checkLowLevelAlerts(); break;
+        case 42: _t->showNotifications(); break;
+        case 43: _t->configureThresholds(); break;
+        case 44: _t->viewFillingHistory(); break;
+        case 45: _t->checkPredictiveAlerts(); break;
+        case 46: _t->showEquipmentStatus(); break;
+        case 47: _t->detectAnomalies(); break;
+        case 48: _t->showStatisticsView(); break;
+        case 49: _t->showMainListView(); break;
         default: ;
         }
     }
@@ -333,13 +416,13 @@ int MainWindow::qt_metacall(QMetaObject::Call _c, int _id, void **_a)
     if (_id < 0)
         return _id;
     if (_c == QMetaObject::InvokeMetaMethod) {
-        if (_id < 37)
+        if (_id < 50)
             qt_static_metacall(this, _c, _id, _a);
-        _id -= 37;
+        _id -= 50;
     } else if (_c == QMetaObject::RegisterMethodArgumentMetaType) {
-        if (_id < 37)
+        if (_id < 50)
             *reinterpret_cast<QMetaType *>(_a[0]) = QMetaType();
-        _id -= 37;
+        _id -= 50;
     }
     return _id;
 }
