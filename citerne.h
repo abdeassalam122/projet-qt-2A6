@@ -38,6 +38,9 @@ public:
     static bool mettreAJourVolume(QSqlDatabase &db, int id, double nouveauVolume, QString *errorMessage = nullptr);
     static QList<Citerne> afficher(QSqlDatabase &db, QString *errorMessage = nullptr);
 
+    // ✅ NOUVEAU
+    static bool updateTemperature(QSqlDatabase &db, int id, double delta);
+
 private:
     int m_id;
     double m_capaciteL;
@@ -47,4 +50,4 @@ private:
     QDate m_dernierRemplissage;
 };
 
-#endif // CITERNE_H
+#endif

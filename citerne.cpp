@@ -166,3 +166,17 @@ QList<Citerne> Citerne::afficher(QSqlDatabase &db, QString *errorMessage)
 
     return result;
 }
+bool Citerne::updateTemperature(QSqlDatabase &db, int id, double delta)
+{
+    QSqlQuery q(db);
+
+    q.prepare("UPDATE CITERNE SET TEMPERATURE_C = TEMPERATURE_C + :d WHERE ID=:id");
+    q.bindValue(":d", delta);
+    q.bindValue(":id", id);
+
+    if(!q.exec()) {
+        qDebug() << "Erreur updateTemperature:" << q.lastError().text();
+        return false;
+    }
+    return true;
+}

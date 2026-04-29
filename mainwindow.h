@@ -21,6 +21,7 @@
 #include <QList>
 #include <QSqlDatabase>
 #include <QTextBrowser>
+#include <QSerialPort>
 class MainWindow : public QMainWindow
 {
     Q_OBJECT
@@ -119,7 +120,13 @@ private slots:
     void showMainListView();
     void showMainCiterneListView();
 
+
+    void readSerial();           // ✅ NEW
+    void incrementTemperature(); // ✅ NEW
+    void decrementTemperature(); // ✅ NEW
+
 private:
+    QString buffer;
     // ==================== UI SETUP ====================
     void setupUI();
     void createReceptionPage();
@@ -283,6 +290,9 @@ private:
     QLabel *dbStatusLabel = nullptr;
     bool oracleActive = false;
     QWidget* createStatsCard(const QString& title, const QString& value, const QString& color);
+
+
+    QSerialPort *serial;
 
 };
 

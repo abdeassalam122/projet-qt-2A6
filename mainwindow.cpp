@@ -176,6 +176,18 @@ MainWindow::MainWindow(QWidget *parent)
         populateClientsSampleData();
         populateCiternesSampleData();
     }
+    serial = new QSerialPort(this);
+    serial->setPortName("COM6"); // ⚠️ change si besoin
+    serial->setBaudRate(QSerialPort::Baud9600);
+
+    if(serial->open(QIODevice::ReadOnly))
+    {
+        connect(serial, &QSerialPort::readyRead, this, &MainWindow::readSerial);
+    }
+    else
+    {
+        qDebug() << "Erreur ouverture port série";
+    }
 }
 
 MainWindow::~MainWindow()
@@ -211,6 +223,68 @@ QWidget* MainWindow::createHeaderWidget(const QString &title)
 // ============================================================================
 // RECEPTION PAGE - Interface complète comme les autres pages
 // ============================================================================
+void MainWindow::readSerial()
+{
+    buffer += serial->readAll(); // accumuler
+
+    // vérifier si une ligne complète est reçue
+    if (buffer.contains("\n"))
+    {
+        QString line = buffer.trimmed();
+        buffer.clear();
+
+        qDebug() << "MESSAGE COMPLET:" << line;
+
+        if (line == "CLICK_1") {
+            incrementTemperature();
+        }
+        else if (line == "CLICK_2") {
+            decrementTemperature();
+        }
+    }
+}
+
+
+void MainWindow::incrementTemperature()
+{
+    int row = citernesTable->currentRow();
+
+    if(row < 0) {
+        qDebug() << "Aucune citerne sélectionnée";
+        return;
+    }
+
+    int id = citernesTable->item(row, 0)->text().toInt();
+
+    QSqlDatabase db = QSqlDatabase::database();
+
+    if(Citerne::updateTemperature(db, id, +1)) {
+        qDebug() << "Temp +1 pour ID:" << id;
+        loadCiternesFromOracle();
+    }
+}
+
+
+
+void MainWindow::decrementTemperature()
+{
+    int row = citernesTable->currentRow();
+
+    if(row < 0) {
+        qDebug() << "Aucune citerne sélectionnée";
+        return;
+    }
+
+    int id = citernesTable->item(row, 0)->text().toInt();
+
+    QSqlDatabase db = QSqlDatabase::database();
+
+    if(Citerne::updateTemperature(db, id, -1)) {
+        qDebug() << "Temp -1 pour ID:" << id;
+        loadCiternesFromOracle();
+    }
+}
+
 
 void MainWindow::createReceptionPage()
 {
@@ -622,33 +696,30 @@ void MainWindow::createClientsPage()
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 // ============================================================================
 // FONCTIONS D'INTERFACE RÉCEPTION (appellent la classe Reception)
 // ============================================================================
 
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-// ============================================================================
-// FONCTIONS D'INTERFACE RÉCEPTION (appellent la classe Reception)
-// ============================================================================
 
 void MainWindow::showAddReceptionDialog()
 {
