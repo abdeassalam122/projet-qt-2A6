@@ -1,4 +1,4 @@
-#include "reception.h"
+﻿#include "reception.h"
 #include <QSqlError>
 #include <QSqlRecord>
 #include <QSqlQuery>
@@ -67,7 +67,7 @@ bool Reception::ajouter()
     qDebug() << "Inserting reception with ID:" << nextId;
 
     // Insert with explicit ID (no sequence needed)
-    query.prepare("INSERT INTO reception "
+    query.prepare("INSERT INTO RECEPTION "
                   "(id, lot_number, quantity_kg, quality_grade, client_id, status, received_at) "
                   "VALUES (:id, :lot_number, :quantity_kg, "
                   ":quality_grade, :client_id, :status, SYSDATE)");
@@ -102,7 +102,7 @@ int Reception::getNextId()
     QSqlQuery query;
 
     // Try to get max ID + 1
-    if (query.exec("SELECT NVL(MAX(id), 0) + 1 FROM reception")) {
+    if (query.exec("SELECT NVL(MAX(id), 0) + 1 FROM RECEPTION")) {
         if (query.next()) {
             return query.value(0).toInt();
         }
@@ -125,7 +125,7 @@ QSqlQueryModel* Reception::afficher()
     }
 
     model->setQuery("SELECT id, lot_number, TO_CHAR(received_at, 'DD/MM/YYYY') as date_reception, "
-                    "quantity_kg, quality_grade, client_id, status FROM reception ORDER BY id DESC");
+                    "quantity_kg, quality_grade, client_id, status FROM RECEPTION ORDER BY id DESC");
 
     // Check for errors
     QSqlError err = model->lastError();
@@ -154,7 +154,7 @@ bool Reception::supprimer(int id)
 {
     QSqlQuery query;
 
-    query.prepare("DELETE FROM reception WHERE id = :id");
+    query.prepare("DELETE FROM RECEPTION WHERE id = :id");
     query.bindValue(":id", id);
 
     if(!query.exec())
@@ -173,7 +173,7 @@ bool Reception::modifier()
 {
     QSqlQuery query;
 
-    query.prepare("UPDATE reception SET "
+    query.prepare("UPDATE RECEPTION SET "
                   "lot_number = :lot_number, "
                   "quantity_kg = :quantity_kg, "
                   "quality_grade = :quality_grade, "
@@ -207,7 +207,7 @@ QSqlQueryModel* Reception::rechercher(const QString &lot)
     QSqlQuery query;
     query.prepare("SELECT id, lot_number, TO_CHAR(received_at, 'DD/MM/YYYY'), "
                   "quantity_kg, quality_grade, client_id, status "
-                  "FROM reception WHERE LOWER(lot_number) LIKE LOWER(:lot) "
+                  "FROM RECEPTION WHERE LOWER(lot_number) LIKE LOWER(:lot) "
                   "ORDER BY id DESC");
 
     query.bindValue(":lot", "%" + lot + "%");
@@ -241,7 +241,7 @@ Reception Reception::getById(int id)
     QSqlQuery query;
 
     query.prepare("SELECT id, lot_number, quantity_kg, quality_grade, client_id, status "
-                  "FROM reception WHERE id = :id");
+                  "FROM RECEPTION WHERE id = :id");
     query.bindValue(":id", id);
 
     if(query.exec() && query.next())

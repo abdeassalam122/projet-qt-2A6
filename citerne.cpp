@@ -1,4 +1,4 @@
-#include "citerne.h"
+﻿#include "citerne.h"
 
 #include <QSqlError>
 #include <QSqlQuery>

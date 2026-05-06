@@ -1,4 +1,4 @@
-#include "mainwindow.h"
+﻿#include "mainwindow.h"
 #include "reception.h"
 #include "extraction.h"
 #include "connection.h"
@@ -41,9 +41,16 @@
 #include <QFileDialog>
 #include <QPdfWriter>
 #include <QTextDocument>
+#include <QPageLayout>
 #include <QComboBox>
+#include <QCompleter>
+#include <QStringListModel>
+#include <QCoreApplication>
+#include <QStatusBar>
+#include <QTimer>
 #include <algorithm>
 #include <numeric>
+#include <cmath>
 
 namespace {
 
@@ -138,21 +145,13 @@ MainWindow::MainWindow(QWidget *parent)
     stackedWidget = new QStackedWidget(this);
     setCentralWidget(stackedWidget);
 
-    // Create pages
-    createReceptionPage();
-
-    // Set default page
-    stackedWidget->setCurrentWidget(receptionPage);
-
-    // Set window title
-    setWindowTitle("Gestion des Réceptions");
-
-    // Set minimum size
-    setMinimumSize(1000, 600);
+    // setupUI creates all pages and the proper layout
     setupUI();
     applyStyles();
-    oracleActive = promptAndTestOracleConnection();
+    Connection *connection = Connection::instance();
+    oracleActive = connection && connection->isOpen();
     if (oracleActive) {
+        db = connection->database();
         oracleActive = setupOracleSchema();
     }
     updateDatabaseStatusLabel();
@@ -160,14 +159,124 @@ MainWindow::MainWindow(QWidget *parent)
     if (oracleActive) {
         loadClientsFromOracle();
         loadCiternesFromOracle();
+        refreshExtractionData();
     } else {
         populateClientsSampleData();
         populateCiternesSampleData();
+        populateExtractionSampleData();
     }
+
+    setupArduinoMonitoring();
 }
 
 MainWindow::~MainWindow()
 {
+}
+
+void MainWindow::setupArduinoMonitoring()
+{
+    const int connectionResult = m_arduino.connect_arduino();
+    if (connectionResult != 0) {
+        const QString message = "Capteur Arduino non detecte: surveillance temperature inactive.";
+        notificationHistory.append(QString("[%1] %2")
+                                       .arg(QDateTime::currentDateTime().toString("yyyy-MM-dd HH:mm"))
+                                       .arg(message));
+        if (statusBar()) {
+            statusBar()->showMessage(message, 5000);
+        }
+        return;
+    }
+
+    connect(m_arduino.getserial(), &QSerialPort::readyRead,
+            this, &MainWindow::processArduinoTemperatureData);
+
+    const QString message = QString("Capteur Arduino connecte sur le port %1.")
+                                .arg(m_arduino.getarduino_port_name());
+    notificationHistory.append(QString("[%1] %2")
+                                   .arg(QDateTime::currentDateTime().toString("yyyy-MM-dd HH:mm"))
+                                   .arg(message));
+    if (statusBar()) {
+        statusBar()->showMessage(message, 5000);
+    }
+}
+
+void MainWindow::processArduinoTemperatureData()
+{
+    m_arduinoBuffer += QString::fromUtf8(m_arduino.read_from_arduino());
+
+    int lineBreak = -1;
+    while ((lineBreak = m_arduinoBuffer.indexOf('\n')) != -1) {
+        QString line = m_arduinoBuffer.left(lineBreak).trimmed();
+        m_arduinoBuffer.remove(0, lineBreak + 1);
+        line.remove('\r');
+
+        if (line.isEmpty()) {
+            continue;
+        }
+
+        bool ok = false;
+            QRegularExpression re(QStringLiteral("(-?\\d+(?:\\.\\d+)?)"));
+        const QRegularExpressionMatch match = re.match(line);
+        if (match.hasMatch()) {
+            const double temperatureC = match.captured(1).toDouble(&ok);
+            if (ok) {
+                handleArduinoTemperature(temperatureC);
+            }
+        }
+    }
+}
+
+void MainWindow::handleArduinoTemperature(double temperatureC)
+{
+    const QString stamp = QDateTime::currentDateTime().toString("yyyy-MM-dd HH:mm:ss");
+
+    if (temperatureC >= 70.0) {
+        if (m_temperatureAlertState < 2) {
+            m_temperatureAlertState = 2;
+            const QString message = QString("[%1] ALERTE CRITIQUE Arduino: %2°C - arret immediat de l'application.")
+                                        .arg(stamp)
+                                        .arg(temperatureC, 0, 'f', 1);
+            notificationHistory.append(message);
+            if (statusBar()) {
+                statusBar()->showMessage(message, 10000);
+            }
+        }
+
+            QTimer::singleShot(0, []() {
+                QCoreApplication::quit();
+            });
+        return;
+    }
+
+    if (temperatureC >= 60.0) {
+        if (m_temperatureAlertState < 1) {
+            m_temperatureAlertState = 1;
+            const QString message = QString("[%1] Alerte temperature Arduino: %2°C.")
+                                        .arg(stamp)
+                                        .arg(temperatureC, 0, 'f', 1);
+            notificationHistory.append(message);
+            if (statusBar()) {
+                statusBar()->showMessage(message, 10000);
+            }
+
+            QMessageBox::warning(this,
+                                 "Alerte temperature",
+                                 QString("Temperature critique detectee: %1°C.\nLe seuil d'alerte est 60°C.")
+                                     .arg(temperatureC, 0, 'f', 1));
+        }
+        return;
+    }
+
+    if (m_temperatureAlertState != 0) {
+        m_temperatureAlertState = 0;
+        const QString message = QString("[%1] Temperature Arduino revenue a la normale: %2°C.")
+                                    .arg(stamp)
+                                    .arg(temperatureC, 0, 'f', 1);
+        notificationHistory.append(message);
+        if (statusBar()) {
+            statusBar()->showMessage(message, 5000);
+        }
+    }
 }
 
 // ============================================================================
@@ -875,26 +984,23 @@ void MainWindow::showAddExtractionDialog()
         return;
     }
 
-    Extraction extraction(0,
-                          lotId->value(),
-                          machineId->value(),
-                          targetCiterneId->value(),
-                          extractedAt->date(),
-                          inputKg->value(),
-                          outputOil->value(),
-                          status->text().trimmed().isEmpty() ? QStringLiteral("PLANIFIE") : status->text().trimmed());
+    const QString st = status->text().trimmed().isEmpty() ? "PLANIFIE" : status->text().trimmed();
+    Extraction extraction(0, lotId->value(), machineId->value(), targetCiterneId->value(),
+                          extractedAt->date(), inputKg->value(), outputOil->value(), st);
 
-    QString error;
-    if (!extraction.ajouter(db, &error)) {
-        QMessageBox::critical(this, "Erreur", "Ajout extraction impossible:\n" + error);
-        return;
+    if (oracleActive) {
+        QSqlDatabase currentDb = Connection::instance()->database();
+        if (!currentDb.isOpen()) { QMessageBox::critical(this, "Erreur", "Base non connectée."); return; }
+        QString error;
+        if (!extraction.ajouter(currentDb, &error)) { QMessageBox::critical(this, "Erreur", "Ajout impossible:\n" + error); return; }
+    } else {
+        extraction.setId(m_nextExtractionId++);
+        m_extractions.prepend(extraction);
     }
 
-    QMessageBox::information(this, "Succès", "Extraction ajoutée avec succès.");
+    QMessageBox::information(this, "Succès", "Extraction ajoutée.");
     refreshExtractionData();
-    if (searchBoxExtraction) {
-        searchBoxExtraction->clear();
-    }
+    if (searchBoxExtraction) searchBoxExtraction->clear();
 }
 
 void MainWindow::editSelectedExtraction()
@@ -974,13 +1080,18 @@ void MainWindow::editSelectedExtraction()
                           outputOil->value(),
                           status->text().trimmed().isEmpty() ? QStringLiteral("PLANIFIE") : status->text().trimmed());
 
-    QString error;
-    if (!extraction.modifier(db, &error)) {
-        QMessageBox::critical(this, "Erreur", "Modification extraction impossible:\n" + error);
-        return;
+    if (oracleActive) {
+        QSqlDatabase currentDb = Connection::instance()->database();
+        if (!currentDb.isOpen()) { QMessageBox::critical(this, "Erreur", "Base non connectée."); return; }
+        QString error;
+        if (!extraction.modifier(currentDb, &error)) { QMessageBox::critical(this, "Erreur", "Modification impossible:\n" + error); return; }
+    } else {
+        for (int i = 0; i < m_extractions.size(); ++i) {
+            if (m_extractions[i].id() == id) { m_extractions[i] = extraction; break; }
+        }
     }
 
-    QMessageBox::information(this, "Succès", "Extraction modifiée avec succès.");
+    QMessageBox::information(this, "Succès", "Extraction modifiée.");
     refreshExtractionData();
 }
 
@@ -1001,72 +1112,1031 @@ void MainWindow::deleteSelectedExtraction()
         return;
     }
 
-    QString error;
-    if (!Extraction::supprimer(db, id, &error)) {
-        QMessageBox::critical(this, "Erreur", "Suppression extraction impossible:\n" + error);
-        return;
+    if (oracleActive) {
+        QSqlDatabase currentDb = Connection::instance()->database();
+        QString error;
+        if (!Extraction::supprimer(currentDb, id, &error)) {
+            QMessageBox::critical(this, "Erreur", "Suppression impossible:\n" + error); return;
+        }
+    } else {
+        for (int i = 0; i < m_extractions.size(); ++i) {
+            if (m_extractions[i].id() == id) { m_extractions.removeAt(i); break; }
+        }
     }
 
-    QMessageBox::information(this, "Succès", "Extraction supprimée avec succès.");
+    QMessageBox::information(this, "Succès", "Extraction supprimée.");
     refreshExtractionData();
 }
 
 void MainWindow::searchExtraction(const QString &text)
 {
-    QString error;
-    QList<Extraction> rows;
-
-    if (text.trimmed().isEmpty()) {
-        rows = Extraction::afficher(db, &error);
+    if (oracleActive) {
+        QSqlDatabase currentDb = Connection::instance()->database();
+        if (!currentDb.isOpen()) return;
+        QString error;
+        QList<Extraction> rows = text.trimmed().isEmpty()
+            ? Extraction::afficher(currentDb, &error)
+            : Extraction::rechercher(currentDb, text.trimmed(), &error);
+        if (!error.isEmpty()) { QMessageBox::critical(this, "Erreur", error); return; }
+        extractionTable->setRowCount(0);
+        int i = 0;
+        for (const Extraction &e : rows) {
+            extractionTable->insertRow(i);
+            extractionTable->setItem(i,0,new QTableWidgetItem(QString::number(e.id())));
+            extractionTable->setItem(i,1,new QTableWidgetItem(QString::number(e.lotId())));
+            extractionTable->setItem(i,2,new QTableWidgetItem(QString::number(e.machineId())));
+            extractionTable->setItem(i,3,new QTableWidgetItem(QString::number(e.targetCiterneId())));
+            extractionTable->setItem(i,4,new QTableWidgetItem(e.extractedAt().toString("dd/MM/yyyy")));
+            extractionTable->setItem(i,5,new QTableWidgetItem(QString::number(e.inputQuantityKg(),'f',2)));
+            extractionTable->setItem(i,6,new QTableWidgetItem(QString::number(e.outputOilL(),'f',2)));
+            extractionTable->setItem(i,7,new QTableWidgetItem(e.status()));
+            ++i;
+        }
     } else {
-        rows = Extraction::rechercher(db, text.trimmed(), &error);
-    }
-
-    if (!error.isEmpty()) {
-        QMessageBox::critical(this, "Erreur", "Recherche extraction impossible:\n" + error);
-        return;
-    }
-
-    extractionTable->setRowCount(0);
-    int rowIndex = 0;
-    for (const Extraction &e : rows) {
-        extractionTable->insertRow(rowIndex);
-        extractionTable->setItem(rowIndex, 0, new QTableWidgetItem(QString::number(e.id())));
-        extractionTable->setItem(rowIndex, 1, new QTableWidgetItem(QString::number(e.lotId())));
-        extractionTable->setItem(rowIndex, 2, new QTableWidgetItem(QString::number(e.machineId())));
-        extractionTable->setItem(rowIndex, 3, new QTableWidgetItem(QString::number(e.targetCiterneId())));
-        extractionTable->setItem(rowIndex, 4, new QTableWidgetItem(e.extractedAt().toString("dd/MM/yyyy")));
-        extractionTable->setItem(rowIndex, 5, new QTableWidgetItem(QString::number(e.inputQuantityKg(), 'f', 2)));
-        extractionTable->setItem(rowIndex, 6, new QTableWidgetItem(QString::number(e.outputOilL(), 'f', 2)));
-        extractionTable->setItem(rowIndex, 7, new QTableWidgetItem(e.status()));
-        ++rowIndex;
+        for (int r = 0; r < extractionTable->rowCount(); ++r) {
+            bool match = text.trimmed().isEmpty();
+            if (!match) {
+                for (int c = 0; c < extractionTable->columnCount(); ++c) {
+                    QTableWidgetItem *it = extractionTable->item(r, c);
+                    if (it && it->text().contains(text, Qt::CaseInsensitive)) { match = true; break; }
+                }
+            }
+            extractionTable->setRowHidden(r, !match);
+        }
     }
 }
 
 void MainWindow::refreshExtractionData()
 {
-    QString error;
-    const QList<Extraction> rows = Extraction::afficher(db, &error);
-    if (!error.isEmpty()) {
-        QMessageBox::critical(this, "Erreur", "Chargement extractions impossible:\n" + error);
+    if (oracleActive) {
+        QSqlDatabase currentDb = Connection::instance()->database();
+        if (!currentDb.isOpen()) return;
+        QString error;
+        const QList<Extraction> rows = Extraction::afficher(currentDb, &error);
+        if (!error.isEmpty()) { QMessageBox::critical(this, "Erreur", "Chargement extractions impossible:\n" + error); return; }
+        extractionTable->setRowCount(0);
+        int i = 0;
+        for (const Extraction &e : rows) {
+            extractionTable->insertRow(i);
+            extractionTable->setItem(i,0,new QTableWidgetItem(QString::number(e.id())));
+            extractionTable->setItem(i,1,new QTableWidgetItem(QString::number(e.lotId())));
+            extractionTable->setItem(i,2,new QTableWidgetItem(QString::number(e.machineId())));
+            extractionTable->setItem(i,3,new QTableWidgetItem(QString::number(e.targetCiterneId())));
+            extractionTable->setItem(i,4,new QTableWidgetItem(e.extractedAt().toString("dd/MM/yyyy")));
+            extractionTable->setItem(i,5,new QTableWidgetItem(QString::number(e.inputQuantityKg(),'f',2)));
+            extractionTable->setItem(i,6,new QTableWidgetItem(QString::number(e.outputOilL(),'f',2)));
+            extractionTable->setItem(i,7,new QTableWidgetItem(e.status()));
+            ++i;
+        }
+    } else {
+        extractionTable->setRowCount(0);
+        int i = 0;
+        for (const Extraction &e : m_extractions) {
+            extractionTable->insertRow(i);
+            extractionTable->setItem(i,0,new QTableWidgetItem(QString::number(e.id())));
+            extractionTable->setItem(i,1,new QTableWidgetItem(QString::number(e.lotId())));
+            extractionTable->setItem(i,2,new QTableWidgetItem(QString::number(e.machineId())));
+            extractionTable->setItem(i,3,new QTableWidgetItem(QString::number(e.targetCiterneId())));
+            extractionTable->setItem(i,4,new QTableWidgetItem(e.extractedAt().toString("dd/MM/yyyy")));
+            extractionTable->setItem(i,5,new QTableWidgetItem(QString::number(e.inputQuantityKg(),'f',2)));
+            extractionTable->setItem(i,6,new QTableWidgetItem(QString::number(e.outputOilL(),'f',2)));
+            extractionTable->setItem(i,7,new QTableWidgetItem(e.status()));
+            ++i;
+        }
+    }
+        // Rebuild completer suggestions
+    if (extractionCompleterModel) {
+        QSet<QString> seen;
+        QStringList suggestions;
+        for (int r = 0; r < extractionTable->rowCount(); ++r) {
+            for (int c = 0; c < extractionTable->columnCount(); ++c) {
+                QTableWidgetItem *it = extractionTable->item(r, c);
+                if (!it) continue;
+                const QString val = it->text().trimmed();
+                if (!val.isEmpty() && !seen.contains(val)) {
+                    seen.insert(val);
+                    suggestions << val;
+                }
+            }
+        }
+        suggestions.sort(Qt::CaseInsensitive);
+        extractionCompleterModel->setStringList(suggestions);
+    }
+}
+
+// ============================================================================
+// MÉTIERS AVANCÉS EXTRACTION — Planification IA & Analyse Taux
+// ============================================================================
+
+// Helper: collect all extractions from table into a list
+static QList<Extraction> extractionsFromTable(QTableWidget *t) {
+    QList<Extraction> list;
+    for (int i = 0; i < t->rowCount(); ++i) {
+        if (t->isRowHidden(i)) continue;
+        list.append(Extraction(
+            t->item(i,0)->text().toInt(),
+            t->item(i,1)->text().toInt(),
+            t->item(i,2)->text().toInt(),
+            t->item(i,3)->text().toInt(),
+            QDate::fromString(t->item(i,4)->text(),"dd/MM/yyyy"),
+            t->item(i,5)->text().toDouble(),
+            t->item(i,6)->text().toDouble(),
+            t->item(i,7)->text()
+        ));
+    }
+    return list;
+}
+
+void MainWindow::showPlanificationExtraction()
+{
+    const int row = extractionTable ? extractionTable->currentRow() : -1;
+    if (row < 0) { QMessageBox::warning(this, "Planification IA", "Sélectionnez une extraction."); return; }
+
+    const int id        = extractionTable->item(row,0)->text().toInt();
+    const int machineId = extractionTable->item(row,2)->text().toInt();
+    const int citerneId = extractionTable->item(row,3)->text().toInt();
+    const QString dateStr = extractionTable->item(row,4)->text();
+    const double inputKg  = extractionTable->item(row,5)->text().toDouble();
+    const double outputL  = extractionTable->item(row,6)->text().toDouble();
+    const QString status  = extractionTable->item(row,7)->text();
+
+    // ── Collect all extractions for IA analysis ──────────────────────────────
+    const QList<Extraction> allExtractions = extractionsFromTable(extractionTable);
+
+    // ── Scoring multi-critères (0-100) ────────────────────────────────────────
+    // 1. Charge machine: combien d'extractions EN_COURS sur cette machine
+    int machineLoad = 0;
+    for (const Extraction &ex : allExtractions)
+        if (ex.machineId() == machineId && ex.status() == "EN_COURS") ++machineLoad;
+
+    // 2. Capacité citerne: chercher dans citernesTable
+    double citerneCapacity = 1000.0, citerneVolume = 0.0;
+    for (int r2 = 0; r2 < citernesTable->rowCount(); ++r2) {
+        if (citernesTable->item(r2,0) && citernesTable->item(r2,0)->text().toInt() == citerneId) {
+            citerneCapacity = citernesTable->item(r2,1)->text().toDouble();
+            citerneVolume   = citernesTable->item(r2,2)->text().toDouble();
+            break;
+        }
+    }
+    const double citerneDisponible = citerneCapacity - citerneVolume;
+    const double citerneScore = qBound(0.0, (citerneDisponible / qMax(1.0, citerneCapacity)) * 100.0, 100.0);
+
+    // 3. Taux historique moyen sur cette machine (régression simple)
+    double sumTaux = 0.0; int countTaux = 0;
+    for (const Extraction &ex : allExtractions) {
+        if (ex.machineId() == machineId && ex.status() == "TERMINE" && ex.inputQuantityKg() > 0) {
+            sumTaux += ex.taux(); ++countTaux;
+        }
+    }
+    const double tauxHistorique = (countTaux > 0) ? sumTaux / countTaux : 20.0;
+    const double tauxPrev = (inputKg > 0 && outputL > 0) ? (outputL / inputKg) * 100.0 : tauxHistorique;
+
+    // 4. Prédiction huile si non renseignée (régression linéaire sur historique)
+    double predictedOutput = outputL;
+    if (outputL <= 0.0 && inputKg > 0.0) {
+        // Simple linear regression: output = slope * input
+        double sumXY = 0.0, sumX2 = 0.0;
+        for (const Extraction &ex : allExtractions) {
+            if (ex.machineId() == machineId && ex.status() == "TERMINE" && ex.inputQuantityKg() > 0) {
+                sumXY += ex.inputQuantityKg() * ex.outputOilL();
+                sumX2 += ex.inputQuantityKg() * ex.inputQuantityKg();
+            }
+        }
+        const double slope = (sumX2 > 0) ? sumXY / sumX2 : 0.20;
+        predictedOutput = slope * inputKg;
+    }
+
+    // 5. Score global IA (0-100)
+    const double machineScore  = qBound(0.0, 100.0 - machineLoad * 25.0, 100.0);
+    const double quantityScore = qBound(0.0, qMin(inputKg / 500.0, 1.0) * 100.0, 100.0);
+    const double globalScore   = (machineScore * 0.35) + (citerneScore * 0.35) + (quantityScore * 0.30);
+
+    // 6. Détection de conflits
+    QStringList conflicts;
+    for (const Extraction &ex : allExtractions) {
+        if (ex.id() == id) continue;
+        if (ex.machineId() == machineId && ex.status() == "EN_COURS")
+            conflicts << QString("⚠ Machine #%1 déjà utilisée par extraction #%2").arg(machineId).arg(ex.id());
+        if (ex.targetCiterneId() == citerneId && ex.status() == "EN_COURS")
+            conflicts << QString("⚠ Citerne #%1 déjà cible de l'extraction #%2").arg(citerneId).arg(ex.id());
+        if (ex.extractedAt() == QDate::fromString(dateStr,"dd/MM/yyyy") && ex.machineId() == machineId && ex.id() != id)
+            conflicts << QString("⚠ Conflit de date avec extraction #%1 sur même machine").arg(ex.id());
+    }
+
+    // 7. Séquence optimale suggérée (tri par score de priorité)
+    struct PlanItem { int eid; double priority; QString label; };
+    QList<PlanItem> sequence;
+    for (const Extraction &ex : allExtractions) {
+        if (ex.status() != "PLANIFIE") continue;
+        double p = ex.inputQuantityKg(); // priorité = volume (plus grand = plus urgent)
+        sequence.append({ex.id(), p, QString("EXT#%1 — %2 kg — Machine#%3").arg(ex.id()).arg(ex.inputQuantityKg(),'0','f',0).arg(ex.machineId())});
+    }
+    std::sort(sequence.begin(), sequence.end(), [](const PlanItem &a, const PlanItem &b){ return a.priority > b.priority; });
+
+    // ── Build dialog ──────────────────────────────────────────────────────────
+    QDialog dlg(this);
+    dlg.setWindowTitle("Planification Intelligente — Extraction #" + QString::number(id));
+    dlg.setMinimumSize(720, 620);
+    QVBoxLayout *lay = new QVBoxLayout(&dlg);
+    lay->setSpacing(8);
+
+    // Hero
+    QFrame *hero = new QFrame();
+    hero->setStyleSheet("QFrame{background:qlineargradient(x1:0,y1:0,x2:1,y2:0,stop:0 #0D4A42,stop:1 #1A7A6E);border-radius:12px;}QLabel{color:white;background:transparent;}");
+    QHBoxLayout *heroH = new QHBoxLayout(hero);
+    heroH->setContentsMargins(16,12,16,12);
+    QVBoxLayout *heroText = new QVBoxLayout();
+    heroText->addWidget([]{ auto *l=new QLabel("<b style='font-size:16px'>🤖 Planification Intelligente</b>"); l->setStyleSheet("color:white;background:transparent;"); return l; }());
+    heroText->addWidget([&]{ auto *l=new QLabel("Analyse IA multi-critères · Détection conflits · Optimisation séquence"); l->setStyleSheet("color:#C8EDE8;background:transparent;font-size:11px;"); return l; }());
+    heroH->addLayout(heroText);
+    heroH->addStretch();
+    // Score badge
+    QLabel *scoreBadge = new QLabel(QString::number(int(globalScore)));
+    scoreBadge->setAlignment(Qt::AlignCenter);
+    scoreBadge->setFixedSize(64,64);
+    const QString badgeColor = globalScore >= 70 ? "#38C86A" : globalScore >= 40 ? "#FF7A00" : "#FF3A3A";
+    scoreBadge->setStyleSheet(QString("background:%1;border-radius:32px;color:white;font-size:22px;font-weight:900;").arg(badgeColor));
+    QVBoxLayout *badgeLay = new QVBoxLayout();
+    badgeLay->addWidget(scoreBadge);
+    QLabel *scoreLabel = new QLabel("Score IA");
+    scoreLabel->setStyleSheet("color:#C8EDE8;font-size:10px;font-weight:700;background:transparent;");
+    scoreLabel->setAlignment(Qt::AlignCenter);
+    badgeLay->addWidget(scoreLabel);
+    heroH->addLayout(badgeLay);
+    lay->addWidget(hero);
+
+    // Tabs
+    QTabWidget *tabs = new QTabWidget();
+
+    // ── Tab 1: Analyse ────────────────────────────────────────────────────────
+    QWidget *tabAnalyse = new QWidget();
+    QVBoxLayout *taLay = new QVBoxLayout(tabAnalyse);
+    taLay->setSpacing(8);
+
+    // KPI cards row
+    QHBoxLayout *kpiRow = new QHBoxLayout();
+    auto makeKpi = [](const QString &title, const QString &value, const QString &sub, const QString &color) {
+        QFrame *c = new QFrame();
+        c->setStyleSheet(QString("QFrame{background:white;border:1px solid #D8E2DE;border-left:4px solid %1;border-radius:10px;}QLabel{background:transparent;}").arg(color));
+        QVBoxLayout *cl = new QVBoxLayout(c); cl->setContentsMargins(10,8,10,8); cl->setSpacing(2);
+        auto *t = new QLabel(title); t->setStyleSheet("font-weight:700;color:#35514C;font-size:11px;");
+        auto *v = new QLabel(value); v->setStyleSheet("font-size:22px;font-weight:900;color:#0C4F47;");
+        auto *s = new QLabel(sub);   s->setStyleSheet("color:#6B8E88;font-size:10px;");
+        cl->addWidget(t); cl->addWidget(v); cl->addWidget(s);
+        return c;
+    };
+    kpiRow->addWidget(makeKpi("Score IA Global",    QString::number(int(globalScore)) + "/100",  "Faisabilité estimée",    badgeColor));
+    kpiRow->addWidget(makeKpi("Charge Machine",     QString::number(machineLoad) + " en cours",  "Machine #"+QString::number(machineId), machineLoad>1?"#FF3A3A":"#38C86A"));
+    kpiRow->addWidget(makeKpi("Dispo. Citerne",     QString::number(int(citerneDisponible)) + " L", "Citerne #"+QString::number(citerneId), citerneDisponible>=inputKg?"#38C86A":"#FF3A3A"));
+    kpiRow->addWidget(makeKpi("Taux Prédit",        QString::number(tauxPrev,'f',1) + " %",      "Basé sur historique",    tauxPrev>=20?"#38C86A":tauxPrev>=15?"#FF7A00":"#FF3A3A"));
+    taLay->addLayout(kpiRow);
+
+    // Scores détaillés
+    QFrame *scoresCard = new QFrame();
+    scoresCard->setStyleSheet("QFrame{background:white;border:1px solid #D8E2DE;border-radius:10px;}QLabel{background:transparent;}");
+    QVBoxLayout *scLay = new QVBoxLayout(scoresCard); scLay->setContentsMargins(14,10,14,10);
+    scLay->addWidget([]{ auto *l=new QLabel("<b>Scores par critère</b>"); l->setStyleSheet("color:#114E47;font-size:13px;"); return l; }());
+    auto addScore = [&](const QString &label, double score) {
+        QHBoxLayout *hl = new QHBoxLayout();
+        QLabel *lbl = new QLabel(label); lbl->setFixedWidth(180); lbl->setStyleSheet("color:#35514C;font-weight:600;");
+        QProgressBar *pb = new QProgressBar(); pb->setRange(0,100); pb->setValue(int(score));
+        pb->setFixedHeight(18);
+        const QString c = score>=70?"#38C86A":score>=40?"#FF7A00":"#FF3A3A";
+        pb->setStyleSheet(QString("QProgressBar{border-radius:9px;background:#EEF5F2;}QProgressBar::chunk{border-radius:9px;background:%1;}").arg(c));
+        pb->setFormat(QString::number(int(score)) + "%");
+        QLabel *val = new QLabel(QString::number(int(score)) + "%"); val->setFixedWidth(40); val->setStyleSheet("font-weight:700;color:#0C4F47;");
+        hl->addWidget(lbl); hl->addWidget(pb,1); hl->addWidget(val);
+        scLay->addLayout(hl);
+    };
+    addScore("Disponibilité machine",  machineScore);
+    addScore("Capacité citerne",       citerneScore);
+    addScore("Volume à traiter",       quantityScore);
+    addScore("Score global IA",        globalScore);
+    taLay->addWidget(scoresCard);
+
+    // Prédiction huile
+    if (outputL <= 0.0) {
+        QFrame *predCard = new QFrame();
+        predCard->setStyleSheet("QFrame{background:#F0FBF8;border:1px solid #B8DDD6;border-radius:10px;}QLabel{background:transparent;}");
+        QHBoxLayout *ph = new QHBoxLayout(predCard); ph->setContentsMargins(14,10,14,10);
+        QLabel *pIcon = new QLabel("🔮"); pIcon->setStyleSheet("font-size:28px;background:transparent;");
+        QVBoxLayout *pText = new QVBoxLayout();
+        pText->addWidget([]{ auto *l=new QLabel("<b>Prédiction IA — Huile attendue</b>"); l->setStyleSheet("color:#114E47;background:transparent;"); return l; }());
+        pText->addWidget([&]{ auto *l=new QLabel(QString("Régression linéaire sur %1 extraction(s) historique(s) de la machine #%2").arg(countTaux).arg(machineId)); l->setStyleSheet("color:#35514C;font-size:11px;background:transparent;"); return l; }());
+        QLabel *predVal = new QLabel(QString::number(predictedOutput,'f',1) + " L  (taux prédit: " + QString::number(tauxHistorique,'f',1) + "%)");
+        predVal->setStyleSheet("font-size:18px;font-weight:900;color:#0C4F47;background:transparent;");
+        pText->addWidget(predVal);
+        ph->addWidget(pIcon); ph->addLayout(pText,1);
+        taLay->addWidget(predCard);
+    }
+    taLay->addStretch();
+    tabs->addTab(tabAnalyse, "📊 Analyse IA");
+
+    // ── Tab 2: Conflits ───────────────────────────────────────────────────────
+    QWidget *tabConflicts = new QWidget();
+    QVBoxLayout *tcLay = new QVBoxLayout(tabConflicts);
+    if (conflicts.isEmpty()) {
+        QLabel *ok = new QLabel("✅  Aucun conflit détecté — extraction planifiable immédiatement.");
+        ok->setStyleSheet("padding:16px;background:#F0FBF8;border:1px solid #B8DDD6;border-radius:10px;font-weight:700;color:#1A6B5A;");
+        ok->setWordWrap(true);
+        tcLay->addWidget(ok);
+    } else {
+        QLabel *hdr2 = new QLabel(QString("<b>%1 conflit(s) détecté(s)</b>").arg(conflicts.size()));
+        hdr2->setStyleSheet("color:#8A2020;font-size:13px;");
+        tcLay->addWidget(hdr2);
+        for (const QString &c : conflicts) {
+            QLabel *cl = new QLabel(c); cl->setWordWrap(true);
+            cl->setStyleSheet("padding:8px;background:#FFF0F0;border:1px solid #F0BABA;border-radius:8px;color:#7A1A1A;font-weight:600;");
+            tcLay->addWidget(cl);
+        }
+    }
+    tcLay->addStretch();
+    tabs->addTab(tabConflicts, QString("⚠ Conflits (%1)").arg(conflicts.size()));
+
+    // ── Tab 3: Séquence optimale ──────────────────────────────────────────────
+    QWidget *tabSeq = new QWidget();
+    QVBoxLayout *tsLay = new QVBoxLayout(tabSeq);
+    QLabel *seqHdr = new QLabel("<b>Séquence optimale suggérée par l'IA</b> (tri par volume décroissant)");
+    seqHdr->setStyleSheet("color:#114E47;font-size:12px;");
+    tsLay->addWidget(seqHdr);
+    QTableWidget *seqTable = new QTableWidget(sequence.size(), 3);
+    seqTable->setHorizontalHeaderLabels({"Priorité", "Extraction", "Volume (kg)"});
+    seqTable->horizontalHeader()->setSectionResizeMode(1, QHeaderView::Stretch);
+    seqTable->verticalHeader()->setVisible(false);
+    seqTable->setEditTriggers(QAbstractItemView::NoEditTriggers);
+    seqTable->setAlternatingRowColors(true);
+    for (int i = 0; i < sequence.size(); ++i) {
+        seqTable->setItem(i,0,new QTableWidgetItem(QString("#%1").arg(i+1)));
+        seqTable->setItem(i,1,new QTableWidgetItem(sequence[i].label));
+        seqTable->setItem(i,2,new QTableWidgetItem(QString::number(sequence[i].priority,'f',0)));
+        if (sequence[i].eid == id) {
+            for (int c=0;c<3;++c) if(seqTable->item(i,c)) seqTable->item(i,c)->setBackground(QColor("#D6EAE3"));
+        }
+    }
+    if (sequence.isEmpty()) {
+        QLabel *noSeq = new QLabel("Aucune extraction PLANIFIE dans la liste.");
+        noSeq->setStyleSheet("color:#6B8E88;padding:8px;");
+        tsLay->addWidget(noSeq);
+    }
+    tsLay->addWidget(seqTable,1);
+    tabs->addTab(tabSeq, "🗓 Séquence");
+
+    // ── Tab 4: Recommandations ────────────────────────────────────────────────
+    QWidget *tabReco = new QWidget();
+    QVBoxLayout *trLay = new QVBoxLayout(tabReco);
+    QStringList recos;
+    if (globalScore >= 70)
+        recos << "✅ Score IA élevé — lancement recommandé sans délai.";
+    else if (globalScore >= 40)
+        recos << "🟡 Score IA moyen — vérifier les points d'attention avant lancement.";
+    else
+        recos << "🔴 Score IA faible — résoudre les conflits avant de planifier.";
+    if (machineLoad > 0)
+        recos << QString("⚙️ Machine #%1 a %2 extraction(s) en cours — risque de surcharge.").arg(machineId).arg(machineLoad);
+    if (citerneDisponible < inputKg)
+        recos << QString("🪣 Citerne #%1 insuffisante (%2 L dispo < %3 kg entrée) — choisir une autre citerne.").arg(citerneId).arg(int(citerneDisponible)).arg(int(inputKg));
+    if (outputL <= 0.0)
+        recos << QString("🔮 Huile non renseignée — prédiction IA: %1 L (taux historique: %2%).").arg(predictedOutput,'0','f',1).arg(tauxHistorique,'0','f',1);
+    if (countTaux < 3)
+        recos << "📈 Historique insuffisant (< 3 extractions terminées) — prédictions moins précises.";
+    if (status == "PLANIFIE" && conflicts.isEmpty() && globalScore >= 70)
+        recos << "🚀 Extraction prête — peut être passée EN_COURS immédiatement.";
+
+    for (const QString &r : recos) {
+        QLabel *rl = new QLabel(r); rl->setWordWrap(true);
+        const QString bg = r.startsWith("✅")||r.startsWith("🚀") ? "#F0FBF8" : r.startsWith("🔴") ? "#FFF0F0" : "#FFFBF0";
+        const QString border = r.startsWith("✅")||r.startsWith("🚀") ? "#B8DDD6" : r.startsWith("🔴") ? "#F0BABA" : "#F0DFA0";
+        rl->setStyleSheet(QString("padding:10px;background:%1;border:1px solid %2;border-radius:8px;font-weight:600;").arg(bg,border));
+        trLay->addWidget(rl);
+    }
+    trLay->addStretch();
+    tabs->addTab(tabReco, "💡 Recommandations");
+
+    lay->addWidget(tabs, 1);
+    QDialogButtonBox *bb = new QDialogButtonBox(QDialogButtonBox::Ok);
+    connect(bb, &QDialogButtonBox::accepted, &dlg, &QDialog::accept);
+    lay->addWidget(bb);
+    dlg.exec();
+}
+
+void MainWindow::showTauxExtraction()
+{
+    const int row = extractionTable ? extractionTable->currentRow() : -1;
+    if (row < 0) { QMessageBox::warning(this, "Analyse Taux", "Sélectionnez une extraction."); return; }
+
+    const int id       = extractionTable->item(row,0)->text().toInt();
+    const int machineId= extractionTable->item(row,2)->text().toInt();
+    const double inputKg = extractionTable->item(row,5)->text().toDouble();
+    const double outputL = extractionTable->item(row,6)->text().toDouble();
+    const QString status = extractionTable->item(row,7)->text();
+
+    const QList<Extraction> allExtractions = extractionsFromTable(extractionTable);
+
+    // ── Statistiques sur toutes les extractions terminées ─────────────────────
+    QList<double> allTaux, machineTaux;
+    for (const Extraction &ex : allExtractions) {
+        if (ex.status() == "TERMINE" && ex.inputQuantityKg() > 0 && ex.outputOilL() > 0) {
+            const double t = ex.taux();
+            allTaux.append(t);
+            if (ex.machineId() == machineId) machineTaux.append(t);
+        }
+    }
+
+    // Moyenne et écart-type global
+    double mean = 0.0, stddev = 0.0;
+    if (!allTaux.isEmpty()) {
+        for (double t : allTaux) mean += t;
+        mean /= allTaux.size();
+        for (double t : allTaux) stddev += (t - mean) * (t - mean);
+        stddev = std::sqrt(stddev / allTaux.size());
+    }
+
+    // Moyenne machine
+    double machineMean = 0.0;
+    if (!machineTaux.isEmpty()) {
+        for (double t : machineTaux) machineMean += t;
+        machineMean /= machineTaux.size();
+    }
+
+    // Taux courant
+    const double taux = (inputKg > 0 && outputL > 0) ? (outputL / inputKg) * 100.0 : 0.0;
+
+    // Z-score (détection anomalie statistique)
+    const double zscore = (stddev > 0 && taux > 0) ? (taux - mean) / stddev : 0.0;
+    const bool isAnomaly = std::abs(zscore) > 2.0;
+
+    // Percentile
+    int percentile = 0;
+    if (!allTaux.isEmpty() && taux > 0) {
+        int below = 0;
+        for (double t : allTaux) if (t < taux) ++below;
+        percentile = int((double(below) / allTaux.size()) * 100.0);
+    }
+
+    // Tendance (régression linéaire temporelle sur les N dernières extractions de la machine)
+    double trendSlope = 0.0;
+    if (machineTaux.size() >= 3) {
+        double sumX=0,sumY=0,sumXY=0,sumX2=0;
+        int n = machineTaux.size();
+        for (int i=0;i<n;++i){ sumX+=i; sumY+=machineTaux[i]; sumXY+=i*machineTaux[i]; sumX2+=i*i; }
+        trendSlope = (n*sumXY - sumX*sumY) / qMax(1.0, n*sumX2 - sumX*sumX);
+    }
+
+    // Min/Max
+    double minTaux = allTaux.isEmpty() ? 0.0 : *std::min_element(allTaux.begin(), allTaux.end());
+    double maxTaux = allTaux.isEmpty() ? 0.0 : *std::max_element(allTaux.begin(), allTaux.end());
+
+    // ── Build dialog ──────────────────────────────────────────────────────────
+    QDialog dlg(this);
+    dlg.setWindowTitle("Analyse Avancée du Taux — Extraction #" + QString::number(id));
+    dlg.setMinimumSize(700, 580);
+    QVBoxLayout *lay = new QVBoxLayout(&dlg);
+    lay->setSpacing(8);
+
+    // Hero
+    QFrame *hero = new QFrame();
+    hero->setStyleSheet("QFrame{background:qlineargradient(x1:0,y1:0,x2:1,y2:0,stop:0 #0D4A42,stop:1 #1A7A6E);border-radius:12px;}QLabel{color:white;background:transparent;}");
+    QHBoxLayout *heroH = new QHBoxLayout(hero); heroH->setContentsMargins(16,12,16,12);
+    QVBoxLayout *heroText = new QVBoxLayout();
+    heroText->addWidget([]{ auto *l=new QLabel("<b style='font-size:16px'>📈 Analyse Statistique du Taux d'Extraction</b>"); l->setStyleSheet("color:white;background:transparent;"); return l; }());
+    heroText->addWidget([]{ auto *l=new QLabel("Benchmarking · Détection anomalies (Z-score) · Tendance · Prédiction"); l->setStyleSheet("color:#C8EDE8;background:transparent;font-size:11px;"); return l; }());
+    heroH->addLayout(heroText); heroH->addStretch();
+    // Taux badge
+    const QString tauxColor = taux>=25?"#38C86A":taux>=18?"#FF7A00":taux>0?"#FF3A3A":"#888888";
+    QLabel *tauxBadge = new QLabel(taux>0 ? QString::number(taux,'f',1)+"%" : "N/A");
+    tauxBadge->setAlignment(Qt::AlignCenter); tauxBadge->setFixedSize(72,72);
+    tauxBadge->setStyleSheet(QString("background:%1;border-radius:36px;color:white;font-size:18px;font-weight:900;").arg(tauxColor));
+    QVBoxLayout *badgeLay = new QVBoxLayout(); badgeLay->addWidget(tauxBadge);
+    QLabel *bl = new QLabel("Taux actuel"); bl->setStyleSheet("color:#C8EDE8;font-size:10px;font-weight:700;background:transparent;"); bl->setAlignment(Qt::AlignCenter);
+    badgeLay->addWidget(bl); heroH->addLayout(badgeLay);
+    lay->addWidget(hero);
+
+    QTabWidget *tabs = new QTabWidget();
+
+    // ── Tab 1: Tableau de bord ────────────────────────────────────────────────
+    QWidget *tabDash = new QWidget();
+    QVBoxLayout *tdLay = new QVBoxLayout(tabDash); tdLay->setSpacing(8);
+
+    // KPI row
+    QHBoxLayout *kpiRow = new QHBoxLayout();
+    auto makeKpi2 = [](const QString &title, const QString &value, const QString &sub, const QString &color) {
+        QFrame *c = new QFrame();
+        c->setStyleSheet(QString("QFrame{background:white;border:1px solid #D8E2DE;border-left:4px solid %1;border-radius:10px;}QLabel{background:transparent;}").arg(color));
+        QVBoxLayout *cl = new QVBoxLayout(c); cl->setContentsMargins(10,8,10,8); cl->setSpacing(2);
+        auto *t = new QLabel(title); t->setStyleSheet("font-weight:700;color:#35514C;font-size:11px;");
+        auto *v = new QLabel(value); v->setStyleSheet("font-size:20px;font-weight:900;color:#0C4F47;");
+        auto *s = new QLabel(sub);   s->setStyleSheet("color:#6B8E88;font-size:10px;");
+        cl->addWidget(t); cl->addWidget(v); cl->addWidget(s);
+        return c;
+    };
+    kpiRow->addWidget(makeKpi2("Taux actuel",      taux>0?QString::number(taux,'f',2)+"%":"N/A",    "Extraction #"+QString::number(id), tauxColor));
+    kpiRow->addWidget(makeKpi2("Moyenne globale",  allTaux.isEmpty()?"N/A":QString::number(mean,'f',2)+"%", QString::number(allTaux.size())+" extractions", "#1F9FE0"));
+    kpiRow->addWidget(makeKpi2("Moy. Machine #"+QString::number(machineId), machineTaux.isEmpty()?"N/A":QString::number(machineMean,'f',2)+"%", QString::number(machineTaux.size())+" extractions", "#C67D37"));
+    kpiRow->addWidget(makeKpi2("Percentile",       taux>0?QString::number(percentile)+"e":"N/A",    "vs toutes extractions", percentile>=75?"#38C86A":percentile>=50?"#FF7A00":"#FF3A3A"));
+    tdLay->addLayout(kpiRow);
+
+    // Barre de positionnement
+    QFrame *posCard = new QFrame();
+    posCard->setStyleSheet("QFrame{background:white;border:1px solid #D8E2DE;border-radius:10px;}QLabel{background:transparent;}");
+    QVBoxLayout *posLay = new QVBoxLayout(posCard); posLay->setContentsMargins(14,10,14,10);
+    posLay->addWidget([]{ auto *l=new QLabel("<b>Positionnement vs benchmark industriel</b>"); l->setStyleSheet("color:#114E47;"); return l; }());
+    struct Bench { QString label; double val; QString color; };
+    const QList<Bench> benchmarks = {{"Faible (<18%)",18,"#FF3A3A"},{"Standard (18-22%)",22,"#FF7A00"},{"Bon (22-25%)",25,"#1F9FE0"},{"Excellent (>25%)",30,"#38C86A"}};
+    for (const Bench &b : benchmarks) {
+        QHBoxLayout *bh = new QHBoxLayout();
+        QLabel *bl2 = new QLabel(b.label); bl2->setFixedWidth(160); bl2->setStyleSheet("font-size:11px;color:#35514C;");
+        QProgressBar *pb = new QProgressBar(); pb->setRange(0,35); pb->setValue(int(b.val));
+        pb->setFixedHeight(14);
+        pb->setStyleSheet(QString("QProgressBar{border-radius:7px;background:#EEF5F2;}QProgressBar::chunk{border-radius:7px;background:%1;}").arg(b.color));
+        pb->setTextVisible(false);
+        QLabel *marker = new QLabel(taux > 0 && std::abs(taux - b.val) < 3.5 ? "◀ vous" : "");
+        marker->setStyleSheet("color:#0C4F47;font-weight:700;font-size:11px;");
+        bh->addWidget(bl2); bh->addWidget(pb,1); bh->addWidget(marker);
+        posLay->addLayout(bh);
+    }
+    tdLay->addWidget(posCard);
+
+    // Anomalie Z-score
+    if (taux > 0 && !allTaux.isEmpty()) {
+        QFrame *zCard = new QFrame();
+        const QString zBg = isAnomaly ? "#FFF0F0" : "#F0FBF8";
+        const QString zBorder = isAnomaly ? "#F0BABA" : "#B8DDD6";
+        zCard->setStyleSheet(QString("QFrame{background:%1;border:1px solid %2;border-radius:10px;}QLabel{background:transparent;}").arg(zBg,zBorder));
+        QHBoxLayout *zh = new QHBoxLayout(zCard); zh->setContentsMargins(14,10,14,10);
+        QLabel *zIcon = new QLabel(isAnomaly ? "🚨" : "✅"); zIcon->setStyleSheet("font-size:24px;background:transparent;");
+        QVBoxLayout *zText = new QVBoxLayout();
+        zText->addWidget([&]{ auto *l=new QLabel(isAnomaly ? "<b>Anomalie statistique détectée (Z-score)</b>" : "<b>Taux dans la norme statistique</b>"); l->setStyleSheet(QString("color:%1;").arg(isAnomaly?"#8A2020":"#1A6B5A")); return l; }());
+        zText->addWidget([&]{ auto *l=new QLabel(QString("Z-score: %1  |  Moyenne: %2%  |  Écart-type: %3%  |  Plage normale: [%4% — %5%]")
+            .arg(zscore,'0','f',2).arg(mean,'0','f',1).arg(stddev,'0','f',1)
+            .arg(mean-2*stddev,'0','f',1).arg(mean+2*stddev,'0','f',1));
+            l->setStyleSheet("color:#35514C;font-size:11px;"); return l; }());
+        zh->addWidget(zIcon); zh->addLayout(zText,1);
+        tdLay->addWidget(zCard);
+    }
+    tdLay->addStretch();
+    tabs->addTab(tabDash, "📊 Tableau de bord");
+
+    // ── Tab 2: Tendance & Prédiction ──────────────────────────────────────────
+    QWidget *tabTrend = new QWidget();
+    QVBoxLayout *ttLay = new QVBoxLayout(tabTrend); ttLay->setSpacing(8);
+
+    // Historique machine
+    QLabel *trendHdr = new QLabel(QString("<b>Historique des taux — Machine #%1</b> (%2 extractions terminées)").arg(machineId).arg(machineTaux.size()));
+    trendHdr->setStyleSheet("color:#114E47;font-size:12px;");
+    ttLay->addWidget(trendHdr);
+
+    if (!machineTaux.isEmpty()) {
+        QTableWidget *histTable = new QTableWidget(machineTaux.size(), 3);
+        histTable->setHorizontalHeaderLabels({"#", "Taux (%)", "vs Moyenne"});
+        histTable->horizontalHeader()->setSectionResizeMode(QHeaderView::Stretch);
+        histTable->verticalHeader()->setVisible(false);
+        histTable->setEditTriggers(QAbstractItemView::NoEditTriggers);
+        histTable->setAlternatingRowColors(true);
+        histTable->setMaximumHeight(180);
+        for (int i = 0; i < machineTaux.size(); ++i) {
+            const double t = machineTaux[i];
+            const double diff = t - machineMean;
+            histTable->setItem(i,0,new QTableWidgetItem(QString::number(i+1)));
+            histTable->setItem(i,1,new QTableWidgetItem(QString::number(t,'f',2)));
+            QTableWidgetItem *diffItem = new QTableWidgetItem((diff>=0?"+":"")+QString::number(diff,'f',2)+"%");
+            diffItem->setForeground(diff>=0 ? QColor("#1A6B5A") : QColor("#8A2020"));
+            histTable->setItem(i,2,diffItem);
+        }
+        ttLay->addWidget(histTable);
+
+        // Tendance
+        QFrame *trendCard = new QFrame();
+        trendCard->setStyleSheet("QFrame{background:white;border:1px solid #D8E2DE;border-radius:10px;}QLabel{background:transparent;}");
+        QVBoxLayout *tcl = new QVBoxLayout(trendCard); tcl->setContentsMargins(14,10,14,10);
+        const QString trendDir = trendSlope > 0.1 ? "📈 Tendance haussière" : trendSlope < -0.1 ? "📉 Tendance baissière" : "➡️ Tendance stable";
+        const QString trendColor = trendSlope > 0.1 ? "#1A6B5A" : trendSlope < -0.1 ? "#8A2020" : "#35514C";
+        QLabel *trendLbl = new QLabel(QString("<b>%1</b>  (pente: %2% par extraction)").arg(trendDir).arg(trendSlope,'0','f',3));
+        trendLbl->setStyleSheet(QString("color:%1;font-size:13px;").arg(trendColor));
+        tcl->addWidget(trendLbl);
+
+        // Prédiction prochaine extraction
+        const double nextPrediction = machineMean + trendSlope * machineTaux.size();
+        QLabel *predLbl = new QLabel(QString("🔮 Prédiction prochaine extraction (Machine #%1): <b>%2%</b>").arg(machineId).arg(nextPrediction,'0','f',2));
+        predLbl->setStyleSheet("color:#0C4F47;font-size:12px;");
+        tcl->addWidget(predLbl);
+        ttLay->addWidget(trendCard);
+    } else {
+        QLabel *noData = new QLabel("Pas assez de données historiques pour cette machine.");
+        noData->setStyleSheet("color:#6B8E88;padding:8px;");
+        ttLay->addWidget(noData);
+    }
+
+    // Stats globales
+    if (!allTaux.isEmpty()) {
+        QFrame *statsCard = new QFrame();
+        statsCard->setStyleSheet("QFrame{background:white;border:1px solid #D8E2DE;border-radius:10px;}QLabel{background:transparent;}");
+        QGridLayout *sg = new QGridLayout(statsCard); sg->setContentsMargins(14,10,14,10);
+        auto addStat = [&](int r, int c, const QString &label, const QString &val) {
+            QLabel *l = new QLabel(label); l->setStyleSheet("font-weight:700;color:#35514C;font-size:11px;");
+            QLabel *v = new QLabel(val);   v->setStyleSheet("color:#0C4F47;font-size:13px;font-weight:700;");
+            sg->addWidget(l,r,c*2); sg->addWidget(v,r,c*2+1);
+        };
+        addStat(0,0,"Min global:",  QString::number(minTaux,'f',2)+"%");
+        addStat(0,1,"Max global:",  QString::number(maxTaux,'f',2)+"%");
+        addStat(1,0,"Moyenne:",     QString::number(mean,'f',2)+"%");
+        addStat(1,1,"Écart-type:",  QString::number(stddev,'f',2)+"%");
+        addStat(2,0,"N extractions:",QString::number(allTaux.size()));
+        addStat(2,1,"Percentile:",  QString::number(percentile)+"e");
+        ttLay->addWidget(statsCard);
+    }
+    ttLay->addStretch();
+    tabs->addTab(tabTrend, "📉 Tendance & Prédiction");
+
+    // ── Tab 3: Recommandations ────────────────────────────────────────────────
+    QWidget *tabReco = new QWidget();
+    QVBoxLayout *trLay = new QVBoxLayout(tabReco); trLay->setSpacing(6);
+    QStringList recos;
+    if (taux <= 0.0)
+        recos << "⚪ Aucune donnée de sortie — saisir la quantité d'huile pour activer l'analyse.";
+    else if (taux >= 25.0)
+        recos << "🏆 Taux excellent (>25%) — performance au-dessus de la moyenne industrielle. Documenter les conditions pour reproduire.";
+    else if (taux >= 22.0)
+        recos << "✅ Bon taux (22-25%) — extraction efficace. Maintenir les paramètres actuels.";
+    else if (taux >= 18.0)
+        recos << "🟡 Taux standard (18-22%) — dans la norme. Optimisation possible par réglage machine.";
+    else
+        recos << "🔴 Taux faible (<18%) — vérifier maturité des olives, température de malaxage et réglage centrifugeuse.";
+    if (isAnomaly)
+        recos << QString("🚨 Anomalie statistique (Z=%1) — taux %2 de la normale. Vérifier les conditions d'extraction.").arg(zscore,'0','f',2).arg(zscore>0?"au-dessus":"en-dessous");
+    if (trendSlope < -0.2 && machineTaux.size() >= 3)
+        recos << "📉 Tendance baissière détectée sur cette machine — maintenance préventive recommandée.";
+    if (trendSlope > 0.2 && machineTaux.size() >= 3)
+        recos << "📈 Tendance haussière — machine en amélioration. Continuer le suivi.";
+    if (!allTaux.isEmpty() && taux > 0 && taux < mean - stddev)
+        recos << QString("⚠ Taux inférieur à la moyenne (-%1%) — analyser les paramètres de cette extraction.").arg(mean-taux,'0','f',1);
+    if (machineTaux.size() < 3)
+        recos << "📊 Historique insuffisant — enrichir les données pour améliorer la précision des prédictions.";
+
+    for (const QString &r : recos) {
+        QLabel *rl = new QLabel(r); rl->setWordWrap(true);
+        const QString bg = r.startsWith("🏆")||r.startsWith("✅")||r.startsWith("📈") ? "#F0FBF8" : r.startsWith("🔴")||r.startsWith("🚨") ? "#FFF0F0" : "#FFFBF0";
+        const QString border = r.startsWith("🏆")||r.startsWith("✅")||r.startsWith("📈") ? "#B8DDD6" : r.startsWith("🔴")||r.startsWith("🚨") ? "#F0BABA" : "#F0DFA0";
+        rl->setStyleSheet(QString("padding:10px;background:%1;border:1px solid %2;border-radius:8px;font-weight:600;").arg(bg,border));
+        trLay->addWidget(rl);
+    }
+    trLay->addStretch();
+    tabs->addTab(tabReco, "💡 Recommandations");
+
+    lay->addWidget(tabs, 1);
+    QDialogButtonBox *bb = new QDialogButtonBox(QDialogButtonBox::Ok);
+    connect(bb, &QDialogButtonBox::accepted, &dlg, &QDialog::accept);
+    lay->addWidget(bb);
+    dlg.exec();
+}
+
+// ============================================================================
+// EXTRACTION — Trier, Exporter, Statistiques
+// ============================================================================
+
+void MainWindow::sortExtractionById()
+{
+    // Toggle direction
+    m_extractionSortAsc = !m_extractionSortAsc;
+    const Qt::SortOrder order = m_extractionSortAsc ? Qt::AscendingOrder : Qt::DescendingOrder;
+
+    // Column 0 = ID (numeric) — use a custom sort via the in-memory list or table
+    if (!oracleActive) {
+        // Sort in-memory list
+        std::sort(m_extractions.begin(), m_extractions.end(), [&](const Extraction &a, const Extraction &b) {
+            return m_extractionSortAsc ? a.id() < b.id() : a.id() > b.id();
+        });
+        refreshExtractionData();
+    } else {
+        // Sort the table widget directly by column 0 numerically
+        // Collect rows, sort, repopulate
+        QList<QStringList> rows;
+        for (int r = 0; r < extractionTable->rowCount(); ++r) {
+            QStringList row;
+            for (int c = 0; c < extractionTable->columnCount(); ++c)
+                row << (extractionTable->item(r,c) ? extractionTable->item(r,c)->text() : "");
+            rows.append(row);
+        }
+        std::sort(rows.begin(), rows.end(), [&](const QStringList &a, const QStringList &b) {
+            return m_extractionSortAsc ? a[0].toInt() < b[0].toInt() : a[0].toInt() > b[0].toInt();
+        });
+        extractionTable->setRowCount(0);
+        for (int r = 0; r < rows.size(); ++r) {
+            extractionTable->insertRow(r);
+            for (int c = 0; c < rows[r].size(); ++c)
+                extractionTable->setItem(r, c, new QTableWidgetItem(rows[r][c]));
+        }
+    }
+    // Update header arrow indicator
+    extractionTable->horizontalHeader()->setSortIndicator(0, order);
+    extractionTable->horizontalHeader()->setSortIndicatorShown(true);
+}
+
+void MainWindow::exportExtractions()
+{
+    if (!extractionTable || extractionTable->rowCount() == 0) {
+        QMessageBox::warning(this, "Exporter", "Aucune donnée à exporter.");
         return;
     }
 
-    extractionTable->setRowCount(0);
-    int rowIndex = 0;
-    for (const Extraction &e : rows) {
-        extractionTable->insertRow(rowIndex);
-        extractionTable->setItem(rowIndex, 0, new QTableWidgetItem(QString::number(e.id())));
-        extractionTable->setItem(rowIndex, 1, new QTableWidgetItem(QString::number(e.lotId())));
-        extractionTable->setItem(rowIndex, 2, new QTableWidgetItem(QString::number(e.machineId())));
-        extractionTable->setItem(rowIndex, 3, new QTableWidgetItem(QString::number(e.targetCiterneId())));
-        extractionTable->setItem(rowIndex, 4, new QTableWidgetItem(e.extractedAt().toString("dd/MM/yyyy")));
-        extractionTable->setItem(rowIndex, 5, new QTableWidgetItem(QString::number(e.inputQuantityKg(), 'f', 2)));
-        extractionTable->setItem(rowIndex, 6, new QTableWidgetItem(QString::number(e.outputOilL(), 'f', 2)));
-        extractionTable->setItem(rowIndex, 7, new QTableWidgetItem(e.status()));
-        ++rowIndex;
+    const QString filePath = QFileDialog::getSaveFileName(this,
+        "Exporter les extractions en PDF",
+        QDir::homePath() + "/extractions.pdf",
+        "PDF Files (*.pdf)");
+    if (filePath.isEmpty()) return;
+
+    // Compute totals for summary
+    double totalInput = 0, totalOutput = 0;
+    int countTermine = 0, countPlanifie = 0, countEnCours = 0;
+    QList<double> tauxList;
+    for (int r = 0; r < extractionTable->rowCount(); ++r) {
+        if (extractionTable->isRowHidden(r)) continue;
+        const double inp = extractionTable->item(r,5) ? extractionTable->item(r,5)->text().toDouble() : 0;
+        const double out = extractionTable->item(r,6) ? extractionTable->item(r,6)->text().toDouble() : 0;
+        const QString st = extractionTable->item(r,7) ? extractionTable->item(r,7)->text() : "";
+        totalInput  += inp;
+        totalOutput += out;
+        if (st == "TERMINE")  { ++countTermine;  if (inp > 0 && out > 0) tauxList << (out/inp)*100.0; }
+        if (st == "PLANIFIE") ++countPlanifie;
+        if (st == "EN_COURS") ++countEnCours;
     }
+    double meanTaux = 0;
+    for (double t : tauxList) meanTaux += t;
+    if (!tauxList.isEmpty()) meanTaux /= tauxList.size();
+
+    QString html;
+    html += "<html><body style='font-family:Segoe UI,Arial;color:#1A2B28;'>";
+    html += "<h2 style='color:#0D5B52;'>Rapport d'Extractions</h2>";
+    html += QString("<p style='color:#6B8E88;'>Généré le %1</p>").arg(QDateTime::currentDateTime().toString("dd/MM/yyyy HH:mm"));
+
+    // Summary cards
+    html += "<table width='100%' cellspacing='4' cellpadding='0'><tr>";
+    auto card = [](const QString &title, const QString &val, const QString &color) {
+        return QString("<td><div style='background:%1;border-radius:8px;padding:10px 14px;'>"
+                       "<div style='font-size:11px;font-weight:700;color:white;'>%2</div>"
+                       "<div style='font-size:20px;font-weight:900;color:white;'>%3</div>"
+                       "</div></td>").arg(color, title, val);
+    };
+    html += card("Total entrée",    QString::number(totalInput,'f',0)+" kg",  "#0D5B52");
+    html += card("Total huile",     QString::number(totalOutput,'f',0)+" L",  "#1A7A6E");
+    html += card("Taux moyen",      tauxList.isEmpty()?"N/A":QString::number(meanTaux,'f',1)+"%", "#C67D37");
+    html += card("Terminées",       QString::number(countTermine),  "#2F8652");
+    html += card("En cours",        QString::number(countEnCours),  "#1F9FE0");
+    html += card("Planifiées",      QString::number(countPlanifie), "#8A3131");
+    html += "</tr></table><br>";
+
+    // Table
+    html += "<table border='1' cellspacing='0' cellpadding='6' width='100%' style='border-collapse:collapse;font-size:12px;'>";
+    html += "<tr style='background:#0D5B52;color:white;'>"
+            "<th>ID</th><th>Lot ID</th><th>Machine</th><th>Citerne</th>"
+            "<th>Date</th><th>Entrée (kg)</th><th>Huile (L)</th><th>Taux (%)</th><th>Statut</th></tr>";
+
+    for (int r = 0; r < extractionTable->rowCount(); ++r) {
+        if (extractionTable->isRowHidden(r)) continue;
+        const double inp = extractionTable->item(r,5) ? extractionTable->item(r,5)->text().toDouble() : 0;
+        const double out = extractionTable->item(r,6) ? extractionTable->item(r,6)->text().toDouble() : 0;
+        const double taux = (inp > 0 && out > 0) ? (out/inp)*100.0 : 0.0;
+        const QString st  = extractionTable->item(r,7) ? extractionTable->item(r,7)->text() : "";
+        const QString rowBg = (r%2==0) ? "#FFFFFF" : "#F6FBF9";
+        const QString stColor = st=="TERMINE"?"#1A6B5A":st=="EN_COURS"?"#1F5A8A":st=="ANNULE"?"#8A2020":"#8A6A00";
+        html += QString("<tr style='background:%1;'>").arg(rowBg);
+        for (int c = 0; c < 7; ++c)
+            html += QString("<td>%1</td>").arg(extractionTable->item(r,c) ? extractionTable->item(r,c)->text().toHtmlEscaped() : "");
+        html += QString("<td>%1</td>").arg(taux > 0 ? QString::number(taux,'f',2) : "-");
+        html += QString("<td style='color:%1;font-weight:700;'>%2</td>").arg(stColor, st);
+        html += "</tr>";
+    }
+    html += "</table></body></html>";
+
+    QPdfWriter writer(filePath);
+    writer.setPageSize(QPageSize(QPageSize::A4));
+    writer.setPageOrientation(QPageLayout::Landscape);
+    writer.setResolution(96);
+    QTextDocument doc;
+    doc.setHtml(html);
+    doc.print(&writer);
+
+    QMessageBox::information(this, "Export PDF", "Export terminé:\n" + filePath);
 }
+
+void MainWindow::showExtractionStatistics()
+{
+    if (!extractionTable || extractionTable->rowCount() == 0) {
+        QMessageBox::warning(this, "Statistiques", "Aucune donnée disponible.");
+        return;
+    }
+
+    // Collect data
+    double totalInput = 0, totalOutput = 0;
+    int countTermine = 0, countPlanifie = 0, countEnCours = 0, countAnnule = 0, total = 0;
+    QList<double> tauxList;
+    QMap<int,double> machineOutput; // machineId -> total huile
+    QMap<int,int>    machineCount;
+
+    for (int r = 0; r < extractionTable->rowCount(); ++r) {
+        if (extractionTable->isRowHidden(r)) continue;
+        ++total;
+        const double inp = extractionTable->item(r,5) ? extractionTable->item(r,5)->text().toDouble() : 0;
+        const double out = extractionTable->item(r,6) ? extractionTable->item(r,6)->text().toDouble() : 0;
+        const QString st = extractionTable->item(r,7) ? extractionTable->item(r,7)->text() : "";
+        const int mid    = extractionTable->item(r,2) ? extractionTable->item(r,2)->text().toInt() : 0;
+        totalInput  += inp;
+        totalOutput += out;
+        if (st == "TERMINE")  { ++countTermine;  if (inp>0&&out>0) tauxList << (out/inp)*100.0; }
+        if (st == "PLANIFIE") ++countPlanifie;
+        if (st == "EN_COURS") ++countEnCours;
+        if (st == "ANNULE")   ++countAnnule;
+        machineOutput[mid] += out;
+        machineCount[mid]++;
+    }
+
+    double meanTaux=0, minTaux=0, maxTaux=0, stdTaux=0;
+    if (!tauxList.isEmpty()) {
+        for (double t : tauxList) meanTaux += t;
+        meanTaux /= tauxList.size();
+        minTaux = *std::min_element(tauxList.begin(), tauxList.end());
+        maxTaux = *std::max_element(tauxList.begin(), tauxList.end());
+        for (double t : tauxList) stdTaux += (t-meanTaux)*(t-meanTaux);
+        stdTaux = std::sqrt(stdTaux / tauxList.size());
+    }
+
+    // Best machine
+    int bestMachine = -1; double bestOut = -1;
+    for (auto it = machineOutput.constBegin(); it != machineOutput.constEnd(); ++it)
+        if (it.value() > bestOut) { bestOut = it.value(); bestMachine = it.key(); }
+
+    // ── Dialog ────────────────────────────────────────────────────────────────
+    QDialog dlg(this);
+    dlg.setWindowTitle("Statistiques des Extractions");
+    dlg.setMinimumSize(680, 560);
+    QVBoxLayout *lay = new QVBoxLayout(&dlg);
+    lay->setSpacing(8);
+
+    // Hero
+    QFrame *hero = new QFrame();
+    hero->setStyleSheet("QFrame{background:qlineargradient(x1:0,y1:0,x2:1,y2:0,stop:0 #0D4A42,stop:1 #1A7A6E);border-radius:12px;}QLabel{color:white;background:transparent;}");
+    QHBoxLayout *hh = new QHBoxLayout(hero); hh->setContentsMargins(16,12,16,12);
+    QVBoxLayout *ht = new QVBoxLayout();
+    ht->addWidget([]{ auto *l=new QLabel("<b style='font-size:16px'>📊 Statistiques Extractions</b>"); l->setStyleSheet("color:white;background:transparent;"); return l; }());
+    ht->addWidget([&]{ auto *l=new QLabel(QString("%1 extraction(s) analysée(s)").arg(total)); l->setStyleSheet("color:#C8EDE8;background:transparent;font-size:11px;"); return l; }());
+    hh->addLayout(ht); hh->addStretch();
+    lay->addWidget(hero);
+
+    QTabWidget *tabs = new QTabWidget();
+
+    // ── Tab 1: Vue d'ensemble ─────────────────────────────────────────────────
+    QWidget *tabOverview = new QWidget();
+    QVBoxLayout *toLay = new QVBoxLayout(tabOverview); toLay->setSpacing(8);
+
+    // KPI row 1
+    QHBoxLayout *kpi1 = new QHBoxLayout();
+    auto kpiCard = [](const QString &title, const QString &val, const QString &sub, const QString &color) {
+        QFrame *c = new QFrame();
+        c->setStyleSheet(QString("QFrame{background:white;border:1px solid #D8E2DE;border-left:4px solid %1;border-radius:10px;}QLabel{background:transparent;}").arg(color));
+        QVBoxLayout *cl = new QVBoxLayout(c); cl->setContentsMargins(10,8,10,8); cl->setSpacing(2);
+        auto *t=new QLabel(title); t->setStyleSheet("font-weight:700;color:#35514C;font-size:11px;");
+        auto *v=new QLabel(val);   v->setStyleSheet("font-size:20px;font-weight:900;color:#0C4F47;");
+        auto *s=new QLabel(sub);   s->setStyleSheet("color:#6B8E88;font-size:10px;");
+        cl->addWidget(t); cl->addWidget(v); cl->addWidget(s);
+        return c;
+    };
+    kpi1->addWidget(kpiCard("Total extractions", QString::number(total),                          "toutes",                    "#0D5B52"));
+    kpi1->addWidget(kpiCard("Entrée totale",      QString::number(totalInput,'f',0)+" kg",         "matière première",          "#1F9FE0"));
+    kpi1->addWidget(kpiCard("Huile produite",     QString::number(totalOutput,'f',0)+" L",         "sortie totale",             "#C67D37"));
+    kpi1->addWidget(kpiCard("Taux moyen",         tauxList.isEmpty()?"N/A":QString::number(meanTaux,'f',2)+"%", "extractions terminées", meanTaux>=22?"#38C86A":meanTaux>=18?"#FF7A00":"#FF3A3A"));
+    toLay->addLayout(kpi1);
+
+    // KPI row 2
+    QHBoxLayout *kpi2 = new QHBoxLayout();
+    kpi2->addWidget(kpiCard("Terminées",  QString::number(countTermine),  QString::number(total>0?int(countTermine*100.0/total):0)+"%", "#38C86A"));
+    kpi2->addWidget(kpiCard("En cours",   QString::number(countEnCours),  QString::number(total>0?int(countEnCours*100.0/total):0)+"%",  "#1F9FE0"));
+    kpi2->addWidget(kpiCard("Planifiées", QString::number(countPlanifie), QString::number(total>0?int(countPlanifie*100.0/total):0)+"%", "#FF7A00"));
+    kpi2->addWidget(kpiCard("Annulées",   QString::number(countAnnule),   QString::number(total>0?int(countAnnule*100.0/total):0)+"%",   "#FF3A3A"));
+    toLay->addLayout(kpi2);
+
+    // Statut breakdown bar
+    if (total > 0) {
+        QFrame *barCard = new QFrame();
+        barCard->setStyleSheet("QFrame{background:white;border:1px solid #D8E2DE;border-radius:10px;}QLabel{background:transparent;}");
+        QVBoxLayout *bcl = new QVBoxLayout(barCard); bcl->setContentsMargins(14,10,14,10);
+        bcl->addWidget([]{ auto *l=new QLabel("<b>Répartition des statuts</b>"); l->setStyleSheet("color:#114E47;"); return l; }());
+        struct Bar { QString label; int count; QString color; };
+        for (const Bar &b : QList<Bar>{{"TERMINE",countTermine,"#38C86A"},{"EN_COURS",countEnCours,"#1F9FE0"},{"PLANIFIE",countPlanifie,"#FF7A00"},{"ANNULE",countAnnule,"#FF3A3A"}}) {
+            QHBoxLayout *bh = new QHBoxLayout();
+            QLabel *lbl = new QLabel(b.label); lbl->setFixedWidth(90); lbl->setStyleSheet("font-size:11px;font-weight:600;color:#35514C;");
+            QProgressBar *pb = new QProgressBar(); pb->setRange(0,total); pb->setValue(b.count);
+            pb->setFixedHeight(16);
+            pb->setStyleSheet(QString("QProgressBar{border-radius:8px;background:#EEF5F2;}QProgressBar::chunk{border-radius:8px;background:%1;}").arg(b.color));
+            pb->setTextVisible(false);
+            QLabel *cnt = new QLabel(QString::number(b.count)); cnt->setFixedWidth(30); cnt->setStyleSheet("font-weight:700;color:#0C4F47;font-size:11px;");
+            bh->addWidget(lbl); bh->addWidget(pb,1); bh->addWidget(cnt);
+            bcl->addLayout(bh);
+        }
+        toLay->addWidget(barCard);
+    }
+    toLay->addStretch();
+    tabs->addTab(tabOverview, "📋 Vue d'ensemble");
+
+    // ── Tab 2: Analyse des taux ───────────────────────────────────────────────
+    QWidget *tabTaux = new QWidget();
+    QVBoxLayout *ttLay = new QVBoxLayout(tabTaux); ttLay->setSpacing(8);
+
+    if (tauxList.isEmpty()) {
+        QLabel *noData = new QLabel("Aucune extraction terminée avec données de sortie.");
+        noData->setStyleSheet("color:#6B8E88;padding:12px;");
+        ttLay->addWidget(noData);
+    } else {
+        QHBoxLayout *tauxKpi = new QHBoxLayout();
+        tauxKpi->addWidget(kpiCard("Taux moyen",    QString::number(meanTaux,'f',2)+"%", QString::number(tauxList.size())+" extractions", "#0D5B52"));
+        tauxKpi->addWidget(kpiCard("Taux min",      QString::number(minTaux,'f',2)+"%",  "plus faible",   "#FF3A3A"));
+        tauxKpi->addWidget(kpiCard("Taux max",      QString::number(maxTaux,'f',2)+"%",  "meilleur",      "#38C86A"));
+        tauxKpi->addWidget(kpiCard("Écart-type",    QString::number(stdTaux,'f',2)+"%",  "dispersion",    "#C67D37"));
+        ttLay->addLayout(tauxKpi);
+
+        // Distribution table
+        QFrame *distCard = new QFrame();
+        distCard->setStyleSheet("QFrame{background:white;border:1px solid #D8E2DE;border-radius:10px;}QLabel{background:transparent;}");
+        QVBoxLayout *dcl = new QVBoxLayout(distCard); dcl->setContentsMargins(14,10,14,10);
+        dcl->addWidget([]{ auto *l=new QLabel("<b>Distribution par tranche de taux</b>"); l->setStyleSheet("color:#114E47;"); return l; }());
+        struct Range { QString label; double lo; double hi; QString color; };
+        for (const Range &rng : QList<Range>{{"< 15%",0,15,"#FF3A3A"},{"15-18%",15,18,"#FF7A00"},{"18-22%",18,22,"#1F9FE0"},{"22-25%",22,25,"#38C86A"},{"> 25%",25,100,"#0D5B52"}}) {
+            int cnt = 0;
+            for (double t : tauxList) if (t >= rng.lo && t < rng.hi) ++cnt;
+            QHBoxLayout *rh = new QHBoxLayout();
+            QLabel *rl = new QLabel(rng.label); rl->setFixedWidth(80); rl->setStyleSheet("font-size:11px;font-weight:600;color:#35514C;");
+            QProgressBar *pb = new QProgressBar(); pb->setRange(0,tauxList.size()); pb->setValue(cnt);
+            pb->setFixedHeight(16);
+            pb->setStyleSheet(QString("QProgressBar{border-radius:8px;background:#EEF5F2;}QProgressBar::chunk{border-radius:8px;background:%1;}").arg(rng.color));
+            pb->setTextVisible(false);
+            QLabel *cv = new QLabel(QString::number(cnt)); cv->setFixedWidth(30); cv->setStyleSheet("font-weight:700;color:#0C4F47;font-size:11px;");
+            rh->addWidget(rl); rh->addWidget(pb,1); rh->addWidget(cv);
+            dcl->addLayout(rh);
+        }
+        ttLay->addWidget(distCard);
+    }
+    ttLay->addStretch();
+    tabs->addTab(tabTaux, "📈 Analyse Taux");
+
+    // ── Tab 3: Par machine ────────────────────────────────────────────────────
+    QWidget *tabMachine = new QWidget();
+    QVBoxLayout *tmLay = new QVBoxLayout(tabMachine); tmLay->setSpacing(8);
+
+    if (bestMachine >= 0) {
+        QLabel *bestLbl = new QLabel(QString("🏆 Machine la plus productive: <b>Machine #%1</b> — %2 L produits en %3 extraction(s)")
+            .arg(bestMachine).arg(bestOut,'0','f',0).arg(machineCount[bestMachine]));
+        bestLbl->setStyleSheet("padding:10px;background:#F0FBF8;border:1px solid #B8DDD6;border-radius:8px;font-size:12px;color:#1A6B5A;");
+        bestLbl->setWordWrap(true);
+        tmLay->addWidget(bestLbl);
+    }
+
+    QTableWidget *machTable = new QTableWidget(machineOutput.size(), 4);
+    machTable->setHorizontalHeaderLabels({"Machine", "Extractions", "Huile totale (L)", "Moy. huile/extraction"});
+    machTable->horizontalHeader()->setSectionResizeMode(QHeaderView::Stretch);
+    machTable->verticalHeader()->setVisible(false);
+    machTable->setEditTriggers(QAbstractItemView::NoEditTriggers);
+    machTable->setAlternatingRowColors(true);
+    int mr = 0;
+    for (auto it = machineOutput.constBegin(); it != machineOutput.constEnd(); ++it, ++mr) {
+        const int mid = it.key();
+        const double mout = it.value();
+        const int mcnt = machineCount[mid];
+        machTable->setItem(mr,0,new QTableWidgetItem("Machine #"+QString::number(mid)));
+        machTable->setItem(mr,1,new QTableWidgetItem(QString::number(mcnt)));
+        machTable->setItem(mr,2,new QTableWidgetItem(QString::number(mout,'f',1)));
+        machTable->setItem(mr,3,new QTableWidgetItem(mcnt>0?QString::number(mout/mcnt,'f',1):"0"));
+        if (mid == bestMachine)
+            for (int c=0;c<4;++c) if(machTable->item(mr,c)) machTable->item(mr,c)->setBackground(QColor("#D6EAE3"));
+    }
+    tmLay->addWidget(machTable,1);
+    tabs->addTab(tabMachine, "⚙️ Par Machine");
+
+    lay->addWidget(tabs,1);
+    QDialogButtonBox *bb = new QDialogButtonBox(QDialogButtonBox::Ok);
+    connect(bb, &QDialogButtonBox::accepted, &dlg, &QDialog::accept);
+    lay->addWidget(bb);
+    dlg.exec();
+}
+
+void MainWindow::populateExtractionSampleData()
+{
+    m_extractions.clear();
+    m_nextExtractionId = 1;
+
+    struct S { int lot; int machine; int citerne; QString date; double inKg; double outL; QString status; };
+    const QList<S> data = {
+        {1, 1, 1, "2026-01-10", 500.0,  90.0, "TERMINE"},
+        {2, 1, 2, "2026-01-15", 750.0, 142.5, "TERMINE"},
+        {3, 2, 1, "2026-02-01", 300.0,  51.0, "EN_COURS"},
+        {4, 2, 3, "2026-02-10", 600.0,   0.0, "PLANIFIE"},
+        {5, 1, 2, "2026-02-20", 450.0,   0.0, "PLANIFIE"},
+    };
+    for (const S &s : data) {
+        m_extractions.append(Extraction(m_nextExtractionId++, s.lot, s.machine, s.citerne,
+                                        QDate::fromString(s.date,"yyyy-MM-dd"),
+                                        s.inKg, s.outL, s.status));
+    }
+    refreshExtractionData();
+}
+
 // ============================================================================
 // CITERNE PAGE - reuse simple table + actions (you can expand later)
 // ============================================================================
@@ -1206,9 +2276,49 @@ void MainWindow::createExtractionPage()
     searchBoxExtraction->setObjectName("searchBoxExtraction");
     searchBoxExtraction->setPlaceholderText("Rechercher par ID / Lot / Statut...");
     searchBoxExtraction->setFixedHeight(34);
+
+    // Completer with dynamic suggestions from table content
+    extractionCompleterModel = new QStringListModel(this);
+    QCompleter *completer = new QCompleter(extractionCompleterModel, searchBoxExtraction);
+    completer->setCaseSensitivity(Qt::CaseInsensitive);
+    completer->setFilterMode(Qt::MatchContains);
+    completer->setCompletionMode(QCompleter::PopupCompletion);
+    completer->popup()->setStyleSheet(
+        "QListView { background:#FFFFFF; border:1px solid #0D5B52; border-radius:6px; "
+        "font-size:13px; color:#1A2B28; }"
+        "QListView::item { padding:6px 10px; }"
+        "QListView::item:selected { background:#D6EAE3; color:#0A2E2A; font-weight:700; }"
+    );
+    searchBoxExtraction->setCompleter(completer);
+
+    // When user picks a suggestion, trigger search immediately
+    connect(completer, qOverload<const QString&>(&QCompleter::activated),
+            this, &MainWindow::searchExtraction);
+
     connect(searchBoxExtraction, &QLineEdit::textChanged, this, &MainWindow::searchExtraction);
 
+    QPushButton *sortBtn = new QPushButton("⇅ Trier par ID");
+    sortBtn->setProperty("role", "secondary");
+    sortBtn->setFixedHeight(34);
+    connect(sortBtn, &QPushButton::clicked, this, [this, sortBtn]() {
+        sortExtractionById();
+        sortBtn->setText(m_extractionSortAsc ? "↑ ID Croissant" : "↓ ID Décroissant");
+    });
+
+    QPushButton *exportBtn = new QPushButton("⬇ Exporter");
+    exportBtn->setProperty("role", "secondary");
+    exportBtn->setFixedHeight(34);
+    connect(exportBtn, &QPushButton::clicked, this, &MainWindow::exportExtractions);
+
+    QPushButton *statsExtBtn = new QPushButton("📊 Statistiques");
+    statsExtBtn->setProperty("role", "accent");
+    statsExtBtn->setFixedHeight(34);
+    connect(statsExtBtn, &QPushButton::clicked, this, &MainWindow::showExtractionStatistics);
+
     ctrl->addWidget(searchBoxExtraction);
+    ctrl->addWidget(sortBtn);
+    ctrl->addWidget(exportBtn);
+    ctrl->addWidget(statsExtBtn);
     ctrl->addStretch();
     contentLay->addLayout(ctrl);
 
@@ -1255,15 +2365,27 @@ void MainWindow::createExtractionPage()
     refreshBtn->setFixedSize(130,36);
     connect(refreshBtn, &QPushButton::clicked, this, &MainWindow::refreshExtractionData);
 
+    QPushButton *planBtn = new QPushButton("📋 Planification");
+    planBtn->setProperty("role", "accent");
+    planBtn->setFixedSize(140,36);
+    connect(planBtn, &QPushButton::clicked, this, &MainWindow::showPlanificationExtraction);
+
+    QPushButton *tauxBtn = new QPushButton("📊 Taux");
+    tauxBtn->setProperty("role", "accent");
+    tauxBtn->setFixedSize(100,36);
+    connect(tauxBtn, &QPushButton::clicked, this, &MainWindow::showTauxExtraction);
+
     actions->addWidget(addBtn);
     actions->addWidget(editBtn);
     actions->addWidget(delBtn);
     actions->addWidget(refreshBtn);
+    actions->addWidget(planBtn);
+    actions->addWidget(tauxBtn);
     actions->addStretch();
     contentLay->addLayout(actions);
 
     mainLay->addWidget(content);
-    refreshExtractionData();
+    // Do NOT load data here — db is not connected yet at page creation time
     stackedWidget->addWidget(extractionPage);
 }
 
@@ -1739,92 +2861,10 @@ void MainWindow::populateCiternesSampleData()
 
 bool MainWindow::setupOracleSchema()
 {
+    // Tables already exist in the SYSTEM schema — no DDL needed
     if (!db.isValid() || !db.isOpen()) {
         return false;
     }
-
-    QSqlQuery q(db);
-    auto execSql = [&](const QString &sql, QString &lastError) {
-        if (!q.exec(sql)) {
-            lastError = q.lastError().text();
-            return false;
-        }
-        return true;
-    };
-
-    QString lastError;
-    const QStringList ddl = {
-        "BEGIN EXECUTE IMMEDIATE 'DROP TRIGGER TRG_CLIENTS_APP_BI'; "
-        "EXCEPTION WHEN OTHERS THEN IF SQLCODE != -4080 THEN RAISE; END IF; END;",
-
-        "BEGIN EXECUTE IMMEDIATE 'DROP TRIGGER TRG_CITERNES_APP_BI'; "
-        "EXCEPTION WHEN OTHERS THEN IF SQLCODE != -4080 THEN RAISE; END IF; END;",
-
-        "BEGIN EXECUTE IMMEDIATE 'DROP SEQUENCE SEQ_CLIENTS_APP'; "
-        "EXCEPTION WHEN OTHERS THEN IF SQLCODE != -2289 THEN RAISE; END IF; END;",
-
-        "BEGIN EXECUTE IMMEDIATE 'DROP SEQUENCE SEQ_CITERNES_APP'; "
-        "EXCEPTION WHEN OTHERS THEN IF SQLCODE != -2289 THEN RAISE; END IF; END;",
-
-        "BEGIN EXECUTE IMMEDIATE 'DROP TABLE CLIENTS_APP CASCADE CONSTRAINTS PURGE'; "
-        "EXCEPTION WHEN OTHERS THEN IF SQLCODE != -942 THEN RAISE; END IF; END;",
-
-        "BEGIN EXECUTE IMMEDIATE 'DROP TABLE CITERNES_APP CASCADE CONSTRAINTS PURGE'; "
-        "EXCEPTION WHEN OTHERS THEN IF SQLCODE != -942 THEN RAISE; END IF; END;",
-
-        "BEGIN EXECUTE IMMEDIATE 'CREATE TABLE CLIENT ("
-        "ID NUMBER PRIMARY KEY, "
-        "NAME VARCHAR2(120) NOT NULL, "
-        "EMAIL VARCHAR2(180), "
-        "PHONE VARCHAR2(40), "
-        "ADDRESS VARCHAR2(240), "
-        "CREATED_AT DATE DEFAULT SYSDATE NOT NULL, "
-        "STATUS VARCHAR2(30))'; "
-        "EXCEPTION WHEN OTHERS THEN IF SQLCODE != -955 THEN RAISE; END IF; END;",
-
-        "BEGIN EXECUTE IMMEDIATE 'CREATE TABLE CITERNE ("
-        "ID NUMBER PRIMARY KEY, "
-        "CODE VARCHAR2(40) NOT NULL UNIQUE, "
-        "CAPACITY_L NUMBER(12,2) NOT NULL, "
-        "CURRENT_VOLUME_L NUMBER(12,2) DEFAULT 0 NOT NULL, "
-        "QUALITY_INDEX NUMBER(6,2), "
-        "TEMPERATURE_C NUMBER(5,2), "
-        "LAST_FILLING_AT DATE, "
-        "STATUS VARCHAR2(30), "
-        "CONSTRAINT CK_CITERNE_CAP_POSITIVE CHECK (CAPACITY_L > 0), "
-        "CONSTRAINT CK_CITERNE_VOL_VALID CHECK (CURRENT_VOLUME_L >= 0 AND CURRENT_VOLUME_L <= CAPACITY_L))'; "
-        "EXCEPTION WHEN OTHERS THEN IF SQLCODE != -955 THEN RAISE; END IF; END;",
-
-        "BEGIN EXECUTE IMMEDIATE 'CREATE SEQUENCE SEQ_CLIENT START WITH 1 INCREMENT BY 1 NOCACHE NOCYCLE'; "
-        "EXCEPTION WHEN OTHERS THEN IF SQLCODE != -955 THEN RAISE; END IF; END;",
-
-        "BEGIN EXECUTE IMMEDIATE 'CREATE SEQUENCE SEQ_CITERNE START WITH 1 INCREMENT BY 1 NOCACHE NOCYCLE'; "
-        "EXCEPTION WHEN OTHERS THEN IF SQLCODE != -955 THEN RAISE; END IF; END;",
-
-        "CREATE OR REPLACE TRIGGER TRG_CLIENT_BI "
-        "BEFORE INSERT ON CLIENT "
-        "FOR EACH ROW "
-        "WHEN (NEW.id IS NULL) "
-        "BEGIN "
-        "SELECT SEQ_CLIENT.NEXTVAL INTO :NEW.ID FROM dual; "
-        "END;",
-
-        "CREATE OR REPLACE TRIGGER TRG_CITERNE_BI "
-        "BEFORE INSERT ON CITERNE "
-        "FOR EACH ROW "
-        "WHEN (NEW.id IS NULL) "
-        "BEGIN "
-        "SELECT SEQ_CITERNE.NEXTVAL INTO :NEW.ID FROM dual; "
-        "END;"
-    };
-
-    for (const QString &sql : ddl) {
-        if (!execSql(sql, lastError)) {
-            QMessageBox::critical(this, "Oracle", "Initialisation du schéma échouée:\n" + lastError);
-            return false;
-        }
-    }
-
     return true;
 }
 
@@ -4137,75 +5177,6 @@ void MainWindow::viewFillingHistory()
     }
 
     QMessageBox::information(this, "Historique", notificationHistory.join("\n"));
-}
-
-bool MainWindow::promptAndTestOracleConnection()
-{
-    QDialog dlg(this);
-    dlg.setWindowTitle("Connexion Oracle (ODBC)");
-    dlg.setModal(true);
-    dlg.setMinimumSize(430, 240);
-
-    QFormLayout *form = new QFormLayout();
-    QLineEdit *dsnEdit = new QLineEdit("projetqt");
-    QLineEdit *userEdit = new QLineEdit("awss");
-    QLineEdit *passEdit = new QLineEdit("123");
-    passEdit->setEchoMode(QLineEdit::Password);
-
-    form->addRow("DSN ODBC:", dsnEdit);
-    form->addRow("Utilisateur:", userEdit);
-    form->addRow("Mot de passe:", passEdit);
-
-    QLabel *hint = new QLabel("Saisis le DSN ODBC Oracle puis clique sur OK pour tester la connexion.");
-    hint->setWordWrap(true);
-
-    QVBoxLayout *layout = new QVBoxLayout(&dlg);
-    layout->addWidget(hint);
-    layout->addLayout(form);
-
-    QDialogButtonBox *buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel);
-    connect(buttons, &QDialogButtonBox::accepted, &dlg, [&]() {
-        if (dsnEdit->text().trimmed().isEmpty()) {
-            QMessageBox::warning(&dlg, "Saisie invalide", "Le DSN est obligatoire.");
-            return;
-        }
-        if (userEdit->text().trimmed().isEmpty()) {
-            QMessageBox::warning(&dlg, "Saisie invalide", "L'utilisateur est obligatoire.");
-            return;
-        }
-        dlg.accept();
-    });
-    connect(buttons, &QDialogButtonBox::rejected, &dlg, &QDialog::reject);
-    layout->addWidget(buttons);
-
-    if (dlg.exec() != QDialog::Accepted) {
-        return false;
-    }
-
-    const QString dsn = dsnEdit->text().trimmed();
-    const QString user = userEdit->text().trimmed();
-    const QString pass = passEdit->text();
-
-    QString lastError;
-    Connection *cx = Connection::instance();
-    const bool connected = cx && cx->openOdbcConnection(dsn, user, pass, lastError);
-    if (connected) {
-        db = cx->database();
-        QMessageBox::information(this,
-                                 "Oracle",
-                                 "Connexion Oracle/ODBC réussie.\n"
-                                 "DSN utilisé: " + dsn +
-                                 "\nTest SELECT 1 FROM DUAL = 1");
-        return true;
-    }
-
-    QMessageBox::critical(this,
-                          "Oracle",
-                          "Échec de connexion Oracle via ODBC.\n"
-                          "Vérifie le DSN, l'utilisateur/mot de passe et le driver ODBC Oracle.\n\n"
-                          "Dernière erreur: " + lastError +
-                          "\n\nDrivers Qt disponibles: " + QSqlDatabase::drivers().join(", "));
-    return false;
 }
 
 void MainWindow::updateDatabaseStatusLabel()

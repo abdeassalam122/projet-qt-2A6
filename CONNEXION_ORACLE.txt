@@ -1,0 +1,56 @@
+═══════════════════════════════════════════════════════════════════
+GUIDE DE CONFIGURATION CONNEXION ORACLE
+═══════════════════════════════════════════════════════════════════
+
+IDENTIFIANTS ACTUELS:
+└─ Utilisateur: awss
+└─ Mot de passe: 123
+└─ Base de données: Oracle (tentatives automatiques)
+
+═══════════════════════════════════════════════════════════════════
+ERREUR REÇUE: ORA-01017 (invalid username/password; logon denied)
+═══════════════════════════════════════════════════════════════════
+
+SOLUTIONS À ESSAYER:
+
+1️⃣  MODIFIER LES IDENTIFIANTS
+   Fichier: connection.cpp (lignes 41-42)
+   
+   Remplacez:
+   db.setUserName("awss");
+   db.setPassword("123");
+   
+   Par vos identifiants corrects:
+   db.setUserName("votre_utilisateur");
+   db.setPassword("votre_mot_de_passe");
+
+2️⃣  VÉRIFIER LA BASE DE DONNÉES ORACLE
+   □ La base Oracle est-elle en cours d'exécution?
+   □ La base s'appelle-t-elle XE (Express Edition)?
+   
+   Pour vérifier:
+   - Lancez: SELECT * FROM v$database;
+
+3️⃣  TESTER LA CONNEXION ODBC
+   Panneau de contrôle → Outils d'administration → 
+   Sources de données ODBC → Test "Source_Projet2A"
+   
+   Ou créez une nouvelle connexion avec:
+   - Driver: Oracle in XE
+   - Dbq: localhost:1521/XE
+   - Utilisateur/Mot de passe
+
+4️⃣  AUTRES TENTATIVES
+   - Essayer "system/manager" (compte Oracle par défaut)
+   - Essayer "sys/changeme"
+   - Vérifier le port Oracle (1521 par défaut)
+
+═══════════════════════════════════════════════════════════════════
+FICHIERS À MODIFIER:
+═══════════════════════════════════════════════════════════════════
+
+connection.cpp   (lignes 36-42)  ← Identifiants Oracle
+connection.h      (contrat de la classe)
+mainwindow.cpp    (utilisation de la connexion)
+
+═══════════════════════════════════════════════════════════════════

@@ -30,6 +30,10 @@
 #include <QButtonGroup>
 #include <QTabBar>
 #include <QSqlDatabase>
+#include <QStringListModel>
+#include <QCompleter>
+#include "Arduino.h"
+#include "extraction.h"
 
 class MainWindow : public QMainWindow
 {
@@ -53,6 +57,11 @@ private slots:
     void deleteSelectedExtraction();
     void searchExtraction(const QString &text);
     void refreshExtractionData();
+    void showPlanificationExtraction();
+    void showTauxExtraction();
+    void sortExtractionById();
+    void exportExtractions();
+    void showExtractionStatistics();
 
     // Navigation slots
     void switchToClients();
@@ -140,6 +149,7 @@ private:
     // Extraction widgets
     QTableWidget *extractionTable = nullptr;
     QLineEdit *searchBoxExtraction = nullptr;
+    QStringListModel *extractionCompleterModel = nullptr;
 
     // Clients widgets
     QTableWidget *clientsTable = nullptr;
@@ -199,6 +209,7 @@ private:
     void applyStyles();
     void populateClientsSampleData();
     void populateCiternesSampleData();
+    void populateExtractionSampleData();
 
     // Helpers
     int findClientRowById(int id);
@@ -211,8 +222,10 @@ private:
     QWidget* createProgressWidget(int percent);
     QWidget* createProgressBar(int percent);
 
-    bool promptAndTestOracleConnection();
     void updateDatabaseStatusLabel();
+    void setupArduinoMonitoring();
+    void processArduinoTemperatureData();
+    void handleArduinoTemperature(double temperatureC);
     bool setupOracleSchema();
     void loadClientsFromOracle();
     void loadCiternesFromOracle();
@@ -222,6 +235,14 @@ private:
     QSqlDatabase db;
     QLabel *dbStatusLabel = nullptr;
     bool oracleActive = false;
+    Arduino m_arduino;
+    QString m_arduinoBuffer;
+    int m_temperatureAlertState = 0;
+
+    // In-memory extraction list for demo mode
+    QList<Extraction> m_extractions;
+    int m_nextExtractionId = 1;
+    bool m_extractionSortAsc = false; // toggle: false = DESC first click
 };
 
 #endif // MAINWINDOW_H

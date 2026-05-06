@@ -6,8 +6,8 @@ int main(int argc, char *argv[])
 {
     QApplication a(argc, argv);
     MainWindow w;
-    Connection c;
-    bool test=c.createconnect();
+    Connection* c = Connection::instance();
+    bool test=c->createConnect();
     if(test)
     {w.show();
         QMessageBox::information(nullptr, QObject::tr("database is open"),

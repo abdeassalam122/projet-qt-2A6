@@ -4,7 +4,7 @@
 #
 #-------------------------------------------------
 
-QT       += core gui sql
+QT       += core gui sql serialport
 
 greaterThan(QT_MAJOR_VERSION, 4): QT += widgets
 
@@ -27,22 +27,24 @@ CONFIG += c++11
 SOURCES += \
         main.cpp \
         mainwindow.cpp \
-    connection.cpp \
-    reception.cpp \
-    extraction.cpp \
-    client.cpp \          # AJOUTEZ CETTE LIGNE
-    citerne.cpp           # AJOUTEZ CETTE LIGNE
+        Arduino.cpp \
+        connection.cpp \
+        reception.cpp \
+        extraction.cpp \
+        client.cpp \
+        citerne.cpp
 
 HEADERS += \
         mainwindow.h \
-    connection.h \
-    reception.h \
-    extraction.h \
-    client.h \            # AJOUTEZ CETTE LIGNE
-    citerne.h             # AJOUTEZ CETTE LIGNE
+        Arduino.h \
+        connection.h \
+        reception.h \
+        extraction.h \
+        client.h \
+        citerne.h
 
-# FORMS += \              # COMMENTEZ OU SUPPRIMEZ
-#        mainwindow.ui
+OTHER_FILES += \
+        arduino_temp_monitor.ino
 
 # Default rules for deployment.
 qnx: target.path = /tmp/$${TARGET}/bin

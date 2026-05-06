@@ -45,6 +45,10 @@ public:
     static QList<Extraction> rechercher(QSqlDatabase &db, const QString &term, QString *errorMessage = nullptr);
     static int getNextId(QSqlDatabase &db, QString *errorMessage = nullptr);
 
+    // Méthodes avancées
+    QString planification() const;
+    double taux() const;
+
 private:
     int m_id;
     int m_lotId;
